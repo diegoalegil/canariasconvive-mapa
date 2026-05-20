@@ -2,7 +2,7 @@
 
 Rediseño del mapa público del programa **Canarias Convive** (Gobierno de Canarias + Universidad de La Laguna). Sustituye el mapa por defecto de Mapbox por un estilo cartográfico custom alineado con la identidad visual del programa, añade clustering, filtros, búsqueda y vista 3D.
 
-🔗 **Demo en vivo:** _pendiente de desplegar en GitHub Pages_
+🔗 **Demo en vivo:** [diegoalegil.github.io/canariasconvive-mapa](https://diegoalegil.github.io/canariasconvive-mapa/)
 
 ![Mapa de agentes Canarias Convive — demo con estilo Mapbox custom](screenshot.png)
 
