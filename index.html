@@ -98,16 +98,7 @@
 
 <script>
 // === CONFIGURACIÓN — RELLENA TU TOKEN AQUÍ ===
-(function(){
-  const stored = localStorage.getItem('mapboxToken');
-  if (!stored) {
-    const t = prompt('Pega tu token público de Mapbox (https://account.mapbox.com/access-tokens/):');
-    if (t && t.startsWith('pk.')) { localStorage.setItem('mapboxToken', t); mapboxgl.accessToken = t; }
-    else { alert('Token requerido. Recarga la página e introduce uno válido.'); return; }
-  } else {
-    mapboxgl.accessToken = stored;
-  }
-})();
+mapboxgl.accessToken = 'pk.eyJ1IjoiY2FuYXJpYXMtY29udml2ZSIsImEiOiJjbXBlcHlkcHcwN25pMnBxdjJmemRzY3JoIn0.o0bCnhVjEmdYbfTAbrkKWA';
 
 // Tu estilo publicado
 const STYLE_URL = 'mapbox://styles/canarias-convive/cmpeoky6e001s01sc9al820l5';
