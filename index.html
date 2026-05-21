@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <title>Canarias Convive — Mapa de agentes</title>
-<meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.css" rel="stylesheet" />
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.js"></script>
-<script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
+<script src="https://unpkg.com/@turf/turf@7.3.5/turf.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; font-family: 'Montserrat', sans-serif; color: #323232; -webkit-font-smoothing: antialiased; }
-  #container { display: flex; height: 100vh; }
+  #container { display: flex; height: 100vh; height: 100dvh; }
   #sidebar {
     width: 380px;
     background: #FFFFFF;
@@ -220,8 +220,8 @@
   .detail-logo-block .detail-name { margin: 0; flex: 1; }
 
   @media (max-width: 768px) {
-    #container { flex-direction: column; height: 100vh; overflow: hidden; position: relative; }
-    #map { flex: 1; width: 100%; height: 100vh; }
+    #container { flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; position: relative; }
+    #map { flex: 1; width: 100%; height: 100vh; height: 100dvh; }
     #sidebar {
       position: fixed;
       bottom: 0; left: 0; right: 0;
@@ -364,6 +364,7 @@ const ISLAND_BOUNDS = {
 };
 
 function flyToIslands(islands) {
+  if (!map) return;
   const opts = {
     padding: 60,
     duration: 1500,
@@ -464,8 +465,19 @@ let currentMode = '2d';
 let zonesData = null;
 
 async function load() {
-  const resp = await fetch(GEOJSON_URL);
-  GEOJSON = await resp.json();
+  try {
+    const resp = await fetch(GEOJSON_URL);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    GEOJSON = await resp.json();
+  } catch (err) {
+    console.error('Error cargando entities.geojson:', err);
+    const list = document.getElementById('entity-list');
+    if (list) list.innerHTML = '<div class="empty">No se pudieron cargar las entidades. Recarga la página o revisa tu conexión.</div>';
+    const count = document.getElementById('results-count');
+    if (count) count.textContent = '!';
+    return;
+  }
+
   GEOJSON.features.forEach(f => {
     let s = (f.properties.sector || '').trim();
     f.properties.sector = s || 'Sin sector';
@@ -605,14 +617,14 @@ function renderEntityList(features) {
     const card = document.createElement('div');
     card.className = 'entity-card';
     card.style.setProperty('--c', color);
-    const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.sector;
+    const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.island || p.sector;
     card.innerHTML = `
       <div class="sector-bar"></div>
       <div class="card-logo">${buildLogoHTML(p)}</div>
       <div class="card-body">
         <div class="name">${escapeHTML(p.name)}</div>
         <div class="location">${escapeHTML(loc)}</div>
-        ${p.municipality ? `<div class="sector-label">${escapeHTML(p.sector)}</div>` : ''}
+        ${(p.municipality || p.island) ? `<div class="sector-label">${escapeHTML(p.sector)}</div>` : ''}
       </div>
     `;
     card.addEventListener('click', () => {
@@ -632,6 +644,7 @@ function renderEntityList(features) {
 }
 
 function flyToFeature(f) {
+  if (!map) return;
   const coords = f.geometry.coordinates;
   const pitchKeep = currentMode === '3d' ? 65 : 0;
   const bearingKeep = currentMode === '3d' ? -17 : 0;
@@ -747,31 +760,11 @@ function hideDetail() {
   document.getElementById('view-detail').innerHTML = '';
 }
 
-function openPopup(f, coords) {
-  const p = f.properties;
-  const color = SECTOR_COLORS[p.sector] || '#999';
-  const links = [
-    p.url ? `<a href="${p.url}" target="_blank" rel="noopener">Web</a>` : '',
-    p.facebook ? `<a href="${p.facebook}" target="_blank" rel="noopener">Facebook</a>` : '',
-    p.instagram ? `<a href="${p.instagram}" target="_blank" rel="noopener">Instagram</a>` : '',
-    p.twitter ? `<a href="${p.twitter}" target="_blank" rel="noopener">Twitter</a>` : ''
-  ].filter(Boolean).join('');
-  new mapboxgl.Popup({ offset: 14, maxWidth: '320px' })
-    .setLngLat(coords)
-    .setHTML(`
-      <h3>${p.name}</h3>
-      <div class="pop-pill" style="background:${color}">${p.sector}</div>
-      ${p.typology ? `<div class="pop-meta"><strong>Tipología:</strong> ${p.typology}</div>` : ''}
-      ${p.protagonist ? `<div class="pop-meta"><strong>Protagonista:</strong> ${p.protagonist}</div>` : ''}
-      ${links ? `<div class="pop-links">${links}</div>` : ''}
-    `)
-    .addTo(map);
-}
-
 function setView(mode) {
   currentMode = mode;
   document.getElementById('btn-2d').classList.toggle('active', mode === '2d');
   document.getElementById('btn-3d').classList.toggle('active', mode === '3d');
+  if (!map) return;
   if (mode === '3d') {
     setTowersVisible(true);
     map.easeTo({ pitch: 65, bearing: -17, duration: 1200 });
