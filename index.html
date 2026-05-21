@@ -353,6 +353,39 @@ const STYLE_URL = 'mapbox://styles/canarias-convive/cmpeoky6e001s01sc9al820l5';
 const GEOJSON_URL = 'entities.geojson';
 const CANARIAS_BOUNDS = [[-18.5, 27.5], [-13.3, 29.5]];
 
+const ISLAND_BOUNDS = {
+  'Tenerife':       [[-16.95, 27.98], [-16.10, 28.60]],
+  'Gran Canaria':   [[-15.86, 27.71], [-15.36, 28.20]],
+  'Lanzarote':      [[-13.87, 28.85], [-13.42, 29.25]],
+  'Fuerteventura':  [[-14.56, 28.03], [-13.81, 28.78]],
+  'La Palma':       [[-18.00, 28.45], [-17.70, 28.88]],
+  'La Gomera':      [[-17.40, 28.00], [-17.07, 28.22]],
+  'El Hierro':      [[-18.18, 27.62], [-17.88, 27.85]]
+};
+
+function flyToIslands(islands) {
+  const opts = {
+    padding: 60,
+    duration: 1500,
+    pitch: currentMode === '3d' ? 60 : 0,
+    bearing: currentMode === '3d' ? -17 : 0
+  };
+  if (!islands || islands.size === 0) {
+    map.fitBounds(CANARIAS_BOUNDS, { ...opts, padding: 40 });
+    return;
+  }
+  let sw = [180, 90], ne = [-180, -90];
+  islands.forEach(name => {
+    const b = ISLAND_BOUNDS[name];
+    if (!b) return;
+    sw[0] = Math.min(sw[0], b[0][0]);
+    sw[1] = Math.min(sw[1], b[0][1]);
+    ne[0] = Math.max(ne[0], b[1][0]);
+    ne[1] = Math.max(ne[1], b[1][1]);
+  });
+  if (sw[0] < 180) map.fitBounds([sw, ne], opts);
+}
+
 const SECTOR_COLORS = {
   'Sector ciudadano': '#F55654',
   'Sector religioso': '#B15265',
@@ -472,6 +505,7 @@ function initSidebar() {
         pill.classList.add('selected');
       }
       applyFilter();
+      flyToIslands(activeIslands);
     });
     islandList.appendChild(pill);
   });
