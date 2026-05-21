@@ -338,11 +338,11 @@
     </header>
     <div class="view-list" id="view-list">
       <div class="sidebar-search">
-        <input id="search" class="search-input" type="text" placeholder="Buscar por nombre, sector, tipología…" autocomplete="off" />
+        <input id="search" class="search-input" type="text" placeholder="Buscar por nombre, municipio o sector…" autocomplete="off" />
       </div>
-      <div class="controls">
-        <button id="btn-2d" class="active">2D</button>
-        <button id="btn-3d">3D</button>
+      <div class="controls" role="group" aria-label="Vista del mapa">
+        <button id="btn-2d" class="active" aria-pressed="true">2D</button>
+        <button id="btn-3d" aria-pressed="false">3D</button>
         <button id="btn-fit">Centrar</button>
       </div>
       <details class="sector-filter" open>
@@ -575,11 +575,13 @@ function initSidebar() {
   document.getElementById('btn-2d').addEventListener('click', () => setView('2d'));
   document.getElementById('btn-3d').addEventListener('click', () => setView('3d'));
   document.getElementById('btn-fit').addEventListener('click', () => {
-    document.getElementById('btn-2d').classList.add('active');
-    document.getElementById('btn-3d').classList.remove('active');
+    const btn2 = document.getElementById('btn-2d');
+    const btn3 = document.getElementById('btn-3d');
+    btn2.classList.add('active'); btn2.setAttribute('aria-pressed', 'true');
+    btn3.classList.remove('active'); btn3.setAttribute('aria-pressed', 'false');
     currentMode = '2d';
     setTowersVisible(false);
-    map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
+    if (map) map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
   });
 }
 
@@ -707,12 +709,28 @@ function escapeHTML(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Lista de parámetros de tracking que strippeamos al construir enlaces.
+// fbclid/gclid/mc_*: Facebook/Google Ads/Mailchimp. utm_*: UTM. ref/_ga: otros.
+const TRACKING_PARAMS = /^(fbclid|gclid|mc_(?:eid|cid)|utm_[a-z]+|ref|_ga|_gl|igshid|yclid|msclkid)$/i;
+
 function cleanUrl(u) {
   if (!u) return '';
   const s = String(u).trim();
   if (!s || s.toLowerCase() === 'null') return '';
   const m = s.match(/https?:\/\/[^\s"'<>,)]+/i);
-  return m ? m[0].replace(/[)"',.;:!]+$/, '') : '';
+  if (!m) return '';
+  let raw = m[0].replace(/[)"',.;:!]+$/, '');
+  // Strip tracking params (fbclid, utm_*, gclid...) preservando los útiles.
+  try {
+    const parsed = new URL(raw);
+    const keep = [];
+    parsed.searchParams.forEach((v, k) => { if (!TRACKING_PARAMS.test(k)) keep.push([k, v]); });
+    parsed.search = '';
+    keep.forEach(([k, v]) => parsed.searchParams.append(k, v));
+    // Si la URL terminaba con '/' antes del query, conservar trailing slash limpio
+    raw = parsed.toString().replace(/\?$/, '');
+  } catch (_) { /* URL inválida — devolver tal cual */ }
+  return raw;
 }
 
 function cleanPhone(s) {
@@ -797,26 +815,42 @@ function showDetail(feature) {
   const viewList = document.getElementById('view-list');
   const viewDetail = document.getElementById('view-detail');
   viewDetail.innerHTML = renderDetail(feature);
+  viewDetail.setAttribute('tabindex', '-1');
   viewList.classList.add('hidden');
   viewDetail.classList.add('active');
   viewDetail.scrollTop = 0;
   if (window.innerWidth <= 768) {
-    document.getElementById('sidebar').classList.add('expanded');
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.add('expanded');
+    const dh = document.getElementById('drag-handle');
+    if (dh) dh.setAttribute('aria-expanded', 'true');
   }
-  document.getElementById('back-btn').addEventListener('click', hideDetail);
+  const backBtn = document.getElementById('back-btn');
+  backBtn.addEventListener('click', hideDetail);
   document.getElementById('center-btn').addEventListener('click', () => flyToFeature(feature));
+  // Mueve el foco al botón "Volver" para que lectores de pantalla anuncien
+  // el cambio de vista y la navegación por teclado entre por un control útil.
+  setTimeout(() => backBtn.focus(), 0);
 }
 
 function hideDetail() {
-  document.getElementById('view-list').classList.remove('hidden');
-  document.getElementById('view-detail').classList.remove('active');
-  document.getElementById('view-detail').innerHTML = '';
+  const viewList = document.getElementById('view-list');
+  const viewDetail = document.getElementById('view-detail');
+  viewList.classList.remove('hidden');
+  viewDetail.classList.remove('active');
+  viewDetail.innerHTML = '';
+  const search = document.getElementById('search');
+  if (search) setTimeout(() => search.focus(), 0);
 }
 
 function setView(mode) {
   currentMode = mode;
-  document.getElementById('btn-2d').classList.toggle('active', mode === '2d');
-  document.getElementById('btn-3d').classList.toggle('active', mode === '3d');
+  const btn2 = document.getElementById('btn-2d');
+  const btn3 = document.getElementById('btn-3d');
+  btn2.classList.toggle('active', mode === '2d');
+  btn3.classList.toggle('active', mode === '3d');
+  btn2.setAttribute('aria-pressed', String(mode === '2d'));
+  btn3.setAttribute('aria-pressed', String(mode === '3d'));
   if (!map) return;
   if (mode === '3d') {
     setTowersVisible(true);
@@ -855,6 +889,14 @@ function initMap() {
   });
 
   map.on('load', () => {
+    // El estilo importa Mapbox Standard, que pide sources internas como
+    // `mapbox-3d-events` y `3dbuildings`. En el plan free pueden dar 403
+    // y ensucian la consola. Como ya pintamos nuestros propios edificios
+    // sector-coloreados con el layer `zones`, los nativos son redundantes.
+    try {
+      map.setConfigProperty('basemap', 'show3dObjects', false);
+    } catch (e) { /* import config may not estar disponible en estilos antiguos */ }
+
     map.setFog({
       'range': [0.5, 12],
       'horizon-blend': 0.2,
@@ -961,17 +1003,18 @@ function initMap() {
       }
     });
 
-    map.on('click', 'clusters', async (e) => {
+    map.on('click', 'clusters', (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
       if (!features.length) return;
       const feat = features[0];
-      const clusterId = feat.properties.cluster_id;
-      try {
-        const zoom = await map.getSource('entities').getClusterExpansionZoom(clusterId);
+      // Mapbox GL JS v3 sigue siendo callback-based aquí: el método devuelve
+      // `this` (la source) para chaining y entrega el zoom asíncronamente por
+      // el callback. Hacer await sobre el retorno daba GeoJSONSource ⇒ easeTo
+      // recibía zoom no finito y el cluster nunca expandía.
+      map.getSource('entities').getClusterExpansionZoom(feat.properties.cluster_id, (err, zoom) => {
+        if (err) { console.warn('Cluster expansion failed:', err); return; }
         map.easeTo({ center: feat.geometry.coordinates, zoom });
-      } catch (err) {
-        console.error('Cluster expansion failed:', err);
-      }
+      });
     });
 
     map.on('click', 'unclustered-point', (e) => {
