@@ -926,13 +926,17 @@ function initMap() {
       }
     });
 
-    map.on('click', 'clusters', (e) => {
+    map.on('click', 'clusters', async (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
-      const clusterId = features[0].properties.cluster_id;
-      map.getSource('entities').getClusterExpansionZoom(clusterId, (err, zoom) => {
-        if (err) return;
-        map.easeTo({ center: features[0].geometry.coordinates, zoom });
-      });
+      if (!features.length) return;
+      const feat = features[0];
+      const clusterId = feat.properties.cluster_id;
+      try {
+        const zoom = await map.getSource('entities').getClusterExpansionZoom(clusterId);
+        map.easeTo({ center: feat.geometry.coordinates, zoom });
+      } catch (err) {
+        console.error('Cluster expansion failed:', err);
+      }
     });
 
     map.on('click', 'unclustered-point', (e) => {
