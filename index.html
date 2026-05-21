@@ -248,7 +248,7 @@
       transition: transform 0.32s cubic-bezier(.4,.0,.2,1);
       z-index: 10;
     }
-    #sidebar.expanded { transform: translateY(0); }
+    #sidebar.expanded { transform: translateY(0) !important; }
     .drag-handle {
       display: block;
       position: relative;
@@ -331,7 +331,7 @@
 <body>
 <div id="container">
   <aside id="sidebar">
-    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel"></button>
+    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel" aria-expanded="false"></button>
     <header class="sidebar-header">
       <h1>Canarias Convive</h1>
       <p>Mapa de agentes</p>
@@ -479,6 +479,7 @@ let activeIslands = new Set();
 let searchQuery = '';
 let currentMode = '2d';
 let zonesData = null;
+const seenMapErrors = new Set();
 
 async function load() {
   try {
@@ -566,7 +567,8 @@ function initSidebar() {
   const dragHandle = document.getElementById('drag-handle');
   if (dragHandle) {
     dragHandle.addEventListener('click', () => {
-      document.getElementById('sidebar').classList.toggle('expanded');
+      const expanded = document.getElementById('sidebar').classList.toggle('expanded');
+      dragHandle.setAttribute('aria-expanded', String(expanded));
     });
   }
 
@@ -668,6 +670,35 @@ function flyToFeature(f) {
   const pitchKeep = currentMode === '3d' ? 65 : 0;
   const bearingKeep = currentMode === '3d' ? -17 : 0;
   map.flyTo({ center: coords, zoom: 16, pitch: pitchKeep, bearing: bearingKeep, duration: 1500 });
+}
+
+function formatMapError(err, event) {
+  const parts = [];
+  const normalizeValue = (key, value) => {
+    const text = String(value);
+    if (key !== 'url') return text;
+    try {
+      const url = new URL(text);
+      const path = url.pathname
+        .replace(/\/\d+\/\d+\/\d+\.vector\.pbf$/, '/{z}/{x}/{y}.vector.pbf')
+        .replace(/\/\d+\/\d+\/\d+\.glb$/, '/{z}/{x}/{y}.glb');
+      return `${url.origin}${path}`;
+    } catch (_) {
+      return text.replace(/access_token=[^&\s]+/g, 'access_token=<redacted>');
+    }
+  };
+  const collect = (obj, keys) => {
+    if (!obj) return;
+    keys.forEach(key => {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') {
+        parts.push(`${key}=${normalizeValue(key, value)}`);
+      }
+    });
+  };
+  collect(err, ['message', 'name', 'status', 'statusCode', 'url', 'resource', 'sourceId']);
+  collect(event, ['sourceId', 'sourceLayer', 'tileID']);
+  return parts.join(' ') || String(err || event || 'unknown');
 }
 
 function escapeHTML(s) {
@@ -816,7 +847,11 @@ function initMap() {
   map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
 
   map.on('error', (e) => {
-    console.error('Mapbox error:', e && e.error || e);
+    const err = e && e.error || e;
+    const key = formatMapError(err, e);
+    if (seenMapErrors.has(key)) return;
+    seenMapErrors.add(key);
+    console.warn(`Mapbox warning: ${key}`);
   });
 
   map.on('load', () => {
