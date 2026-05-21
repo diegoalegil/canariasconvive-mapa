@@ -1,0 +1,94 @@
+name: Link check entities.geojson
+
+on:
+  schedule:
+    # Cada lunes a las 06:00 UTC (07:00 Madrid en invierno, 08:00 en verano).
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'entities.geojson'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit URLs in entities.geojson
+        id: audit
+        shell: python {0}
+        run: |
+          import json, ssl, sys, urllib.error, urllib.request, socket
+          from concurrent.futures import ThreadPoolExecutor
+          ctx = ssl._create_unverified_context()
+          d = json.load(open('entities.geojson'))
+          urls = {}
+          for f in d['features']:
+              p = f['properties']
+              for k in ('url', 'facebook', 'instagram', 'twitter'):
+                  u = (p.get(k) or '').strip()
+                  if u.startswith(('http://', 'https://')):
+                      urls.setdefault(u, []).append(p['name'])
+
+          def check(u):
+              for method in ('HEAD', 'GET'):
+                  try:
+                      req = urllib.request.Request(u, method=method, headers={
+                          'User-Agent': 'Mozilla/5.0 (link-audit; +github.com/diegoalegil/canariasconvive-mapa)'
+                      })
+                      with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
+                          return u, r.status, None
+                  except urllib.error.HTTPError as e:
+                      # 403 sin UA real es típico de Cloudflare; lo registramos pero no falla
+                      if e.code in (403, 405):
+                          if method == 'HEAD':
+                              continue
+                          return u, e.code, None
+                      return u, e.code, None
+                  except (socket.timeout, urllib.error.URLError, ConnectionResetError, OSError) as e:
+                      if method == 'HEAD':
+                          continue
+                      return u, None, type(e).__name__
+                  except Exception as e:
+                      return u, None, type(e).__name__
+              return u, None, 'unreachable'
+
+          results = []
+          with ThreadPoolExecutor(max_workers=20) as pool:
+              results.extend(pool.map(check, urls))
+
+          # Categoriza: ok / soft-fail (403, server errors transitorios) / hard-fail (4xx/dns)
+          hard = []
+          soft = []
+          ok = 0
+          for u, code, err in results:
+              if code and 200 <= code < 400:
+                  ok += 1
+              elif code == 403 or (code and 500 <= code < 600):
+                  soft.append((u, code, err))
+              else:
+                  hard.append((u, code, err))
+
+          print(f"## URL audit ({len(urls)} unique)")
+          print(f"- ✅ OK: {ok}")
+          print(f"- ⚠️ Soft fail (403/5xx, may be transient): {len(soft)}")
+          print(f"- ❌ Hard fail (4xx not 403, DNS, timeout): {len(hard)}")
+
+          if hard:
+              print()
+              print("### Hard failures")
+              for u, code, err in sorted(hard, key=lambda x: str(x[1] or x[2] or '')):
+                  ents = ', '.join(urls[u][:2])
+                  print(f"- `[{code or err}]` {u} — {ents}")
+
+          if soft:
+              print()
+              print("### Soft failures (revisar pero no fallar)")
+              for u, code, err in sorted(soft, key=lambda x: str(x[1] or '')):
+                  ents = ', '.join(urls[u][:2])
+                  print(f"- `[{code or err}]` {u} — {ents}")
+
+          # Falla el job solo con hard failures
+          if hard:
+              sys.exit(1)
