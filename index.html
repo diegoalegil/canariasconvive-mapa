@@ -729,26 +729,7 @@ function setView(mode) {
 function setTowersVisible(visible) {
   if (!map) return;
   const vis = visible ? 'visible' : 'none';
-  ['zones', 'cluster-towers'].forEach(id => {
-    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
-  });
-}
-
-function rebuildClusterTowers() {
-  if (!map || !map.getSource('cluster-towers')) return;
-  const clusters = map.querySourceFeatures('entities', { filter: ['has', 'point_count'] });
-  const features = clusters.map(c => {
-    const center = c.geometry.coordinates;
-    const count = c.properties.point_count;
-    const radius = 0.35 + Math.log(count + 1) * 0.22;
-    const poly = turf.circle(center, radius, { steps: 24, units: 'kilometers' });
-    poly.properties = {
-      point_count: count,
-      height: Math.log(count + 1) * 1400 + 400
-    };
-    return poly;
-  });
-  map.getSource('cluster-towers').setData({ type: 'FeatureCollection', features });
+  if (map.getLayer('zones')) map.setLayoutProperty('zones', 'visibility', vis);
 }
 
 function initMap() {
@@ -793,11 +774,6 @@ function initMap() {
 
     map.addSource('zones', { type: 'geojson', data: zonesData });
 
-    map.addSource('cluster-towers', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    });
-
     map.addLayer({
       id: 'zones',
       type: 'fill-extrusion',
@@ -808,25 +784,6 @@ function initMap() {
         'fill-extrusion-height': ['get', 'height'],
         'fill-extrusion-base': 0,
         'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 11, 0.55],
-        'fill-extrusion-vertical-gradient': true
-      }
-    });
-
-    map.addLayer({
-      id: 'cluster-towers',
-      type: 'fill-extrusion',
-      source: 'cluster-towers',
-      layout: { visibility: 'none' },
-      paint: {
-        'fill-extrusion-color': [
-          'interpolate', ['linear'], ['get', 'point_count'],
-          2, '#1A6A60',
-          10, '#0D4E47',
-          50, '#063b35'
-        ],
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 9, 0.85, 13, 0.85, 14, 0],
         'fill-extrusion-vertical-gradient': true
       }
     });
@@ -906,13 +863,6 @@ function initMap() {
     ['clusters', 'unclustered-point'].forEach(id => {
       map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
-    });
-
-    map.on('moveend', () => rebuildClusterTowers());
-    map.on('data', e => {
-      if (e.sourceId === 'entities' && e.isSourceLoaded) {
-        rebuildClusterTowers();
-      }
     });
 
     applyFilter();
