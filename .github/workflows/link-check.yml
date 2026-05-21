@@ -58,14 +58,21 @@ jobs:
           with ThreadPoolExecutor(max_workers=20) as pool:
               results.extend(pool.map(check, urls))
 
-          # Categoriza: ok / soft-fail (403, server errors transitorios) / hard-fail (4xx/dns)
+          # Categoriza: ok / soft-fail (antibot/rate-limit/transient) / hard-fail (4xx/dns)
+          # Soft fails: 403 (Cloudflare antibot), 429 (Instagram rate-limit), 5xx (servidor caído
+          # temporal), 999 (LinkedIn antibot). Si están en hosts conocidos por antibot, lo
+          # marcamos como soft también aunque devuelvan otros códigos.
+          SOFT_CODES = {403, 405, 429, 999}
+          ANTIBOT_HOSTS = ('instagram.com', 'facebook.com', 'linkedin.com', 'x.com', 'twitter.com')
           hard = []
           soft = []
           ok = 0
           for u, code, err in results:
               if code and 200 <= code < 400:
                   ok += 1
-              elif code == 403 or (code and 500 <= code < 600):
+              elif code in SOFT_CODES or (code and 500 <= code < 600):
+                  soft.append((u, code, err))
+              elif any(h in u for h in ANTIBOT_HOSTS):
                   soft.append((u, code, err))
               else:
                   hard.append((u, code, err))
