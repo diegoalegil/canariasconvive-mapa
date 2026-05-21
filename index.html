@@ -75,6 +75,14 @@
     text-transform: uppercase; letter-spacing: 1px;
     z-index: 1; box-shadow: 0 2px 10px rgba(0,0,0,.2);
   }
+  .controls { display: flex; gap: 8px; margin-bottom: 20px; }
+  .controls button {
+    flex: 1; padding: 8px 12px; font-family: inherit; font-size: 12px; font-weight: 600;
+    background: #FFF; border: 1px solid #DDD; border-radius: 6px;
+    cursor: pointer; color: #444; transition: all 0.15s;
+  }
+  .controls button:hover { border-color: #0D4E47; color: #0D4E47; }
+  .controls button.active { background: #0D4E47; color: #FFF; border-color: #0D4E47; }
 </style>
 </head>
 <body>
@@ -85,6 +93,11 @@
     <div class="total">
       <div class="num" id="total-count">234</div>
       <div class="lbl">entidades en el mapa</div>
+    </div>
+    <div class="controls">
+      <button id="btn-2d" class="active">2D</button>
+      <button id="btn-3d">3D</button>
+      <button id="btn-fit">Centrar</button>
     </div>
     <h2>Sectores (clica para filtrar)</h2>
     <ul class="sector-list" id="sector-list"></ul>
@@ -161,8 +174,28 @@ const map = new mapboxgl.Map({
   minZoom: 5
 });
 
-map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
 map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+
+const CANARIAS_BOUNDS = [[-18.5, 27.5], [-13.3, 29.5]];
+
+function setView(mode) {
+  document.getElementById('btn-2d').classList.toggle('active', mode === '2d');
+  document.getElementById('btn-3d').classList.toggle('active', mode === '3d');
+  if (mode === '3d') {
+    map.easeTo({ pitch: 60, bearing: -17, zoom: Math.max(map.getZoom(), 13), duration: 1200 });
+  } else {
+    map.easeTo({ pitch: 0, bearing: 0, duration: 1000 });
+  }
+}
+
+document.getElementById('btn-2d').addEventListener('click', () => setView('2d'));
+document.getElementById('btn-3d').addEventListener('click', () => setView('3d'));
+document.getElementById('btn-fit').addEventListener('click', () => {
+  document.getElementById('btn-2d').classList.add('active');
+  document.getElementById('btn-3d').classList.remove('active');
+  map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
+});
 
 map.on('load', () => {
   map.addSource('entities', {
