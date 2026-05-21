@@ -477,6 +477,7 @@ async function load() {
   };
 
   initSidebar();
+  applyFilter();
   initMap();
 }
 
@@ -643,9 +644,31 @@ function escapeHTML(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function cleanUrl(u) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (!s || s.toLowerCase() === 'null') return '';
+  const m = s.match(/https?:\/\/[^\s"'<>,)]+/i);
+  return m ? m[0].replace(/[)"',.;:!]+$/, '') : '';
+}
+
+function cleanPhone(s) {
+  if (!s) return '';
+  const v = String(s).trim().replace(/^(tel|telefono|tlf|telef)[:.\s]+/i, '').replace(/[^\d+\-()/\s]/g, '').replace(/\s+/g, ' ').trim();
+  const digits = v.replace(/\D/g, '');
+  return digits.length >= 7 ? v : '';
+}
+
+function cleanEmail(s) {
+  if (!s) return '';
+  const v = String(s).trim().replace(/^mailto:/i, '').toLowerCase();
+  return /^[\w.+-]+@[\w.-]+\.\w+$/.test(v) ? v : '';
+}
+
 function buildLinkChip(href, label) {
-  if (!href) return '';
-  return `<a class="detail-link-chip" href="${escapeHTML(href)}" target="_blank" rel="noopener">${label}</a>`;
+  const clean = cleanUrl(href);
+  if (!clean) return '';
+  return `<a class="detail-link-chip" href="${escapeHTML(clean)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
 function renderDetail(feature) {
@@ -671,13 +694,15 @@ function renderDetail(feature) {
     ? `<div class="detail-section"><div class="detail-section-label">Dirección</div><div class="detail-section-value">${escapeHTML(fullAddress)}</div></div>`
     : (locationParts ? `<div class="detail-section"><div class="detail-section-label">Ubicación</div><div class="detail-section-value">${escapeHTML(locationParts)}</div></div>` : '');
 
+  const cleanPhones = phones.map(cleanPhone).filter(Boolean);
+  const cleanEmails = emails.map(cleanEmail).filter(Boolean);
   let phonesBlock = '';
-  if (phones.length) {
-    phonesBlock = `<div class="detail-section"><div class="detail-section-label">Teléfono</div><div class="detail-section-value">${phones.map(x => `<a href="tel:${escapeHTML(x.replace(/\s/g,''))}" style="color:#0D4E47;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
+  if (cleanPhones.length) {
+    phonesBlock = `<div class="detail-section"><div class="detail-section-label">Teléfono</div><div class="detail-section-value">${cleanPhones.map(x => `<a href="tel:${escapeHTML(x.replace(/\s/g,''))}" style="color:#0D4E47;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
   }
   let emailsBlock = '';
-  if (emails.length) {
-    emailsBlock = `<div class="detail-section"><div class="detail-section-label">Email</div><div class="detail-section-value">${emails.map(x => `<a href="mailto:${escapeHTML(x)}" style="color:#F55654;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
+  if (cleanEmails.length) {
+    emailsBlock = `<div class="detail-section"><div class="detail-section-label">Email</div><div class="detail-section-value">${cleanEmails.map(x => `<a href="mailto:${escapeHTML(x)}" style="color:#F55654;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
   }
 
   return `
