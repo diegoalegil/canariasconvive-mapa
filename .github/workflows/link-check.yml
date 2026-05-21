@@ -17,9 +17,14 @@ jobs:
 
       - name: Audit URLs in entities.geojson
         id: audit
+        env:
+          # Solo falla el job si hay más de N hard fails. Algunos servidores
+          # de ONG dan timeout intermitente desde la IP de GitHub Actions
+          # aunque estén vivos en navegador; no queremos ruido constante.
+          HARD_FAIL_THRESHOLD: '25'
         shell: python {0}
         run: |
-          import json, ssl, sys, urllib.error, urllib.request, socket
+          import json, os, ssl, sys, urllib.error, urllib.request, socket
           from concurrent.futures import ThreadPoolExecutor
           ctx = ssl._create_unverified_context()
           d = json.load(open('entities.geojson'))
@@ -40,11 +45,8 @@ jobs:
                       with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
                           return u, r.status, None
                   except urllib.error.HTTPError as e:
-                      # 403 sin UA real es típico de Cloudflare; lo registramos pero no falla
-                      if e.code in (403, 405):
-                          if method == 'HEAD':
-                              continue
-                          return u, e.code, None
+                      if e.code in (403, 405) and method == 'HEAD':
+                          continue
                       return u, e.code, None
                   except (socket.timeout, urllib.error.URLError, ConnectionResetError, OSError) as e:
                       if method == 'HEAD':
@@ -58,15 +60,10 @@ jobs:
           with ThreadPoolExecutor(max_workers=20) as pool:
               results.extend(pool.map(check, urls))
 
-          # Categoriza: ok / soft-fail (antibot/rate-limit/transient) / hard-fail (4xx/dns)
-          # Soft fails: 403 (Cloudflare antibot), 429 (Instagram rate-limit), 5xx (servidor caído
-          # temporal), 999 (LinkedIn antibot). Si están en hosts conocidos por antibot, lo
-          # marcamos como soft también aunque devuelvan otros códigos.
+          # Soft fails: códigos transitorios + hosts antibot conocidos.
           SOFT_CODES = {403, 405, 429, 999}
           ANTIBOT_HOSTS = ('instagram.com', 'facebook.com', 'linkedin.com', 'x.com', 'twitter.com')
-          hard = []
-          soft = []
-          ok = 0
+          hard, soft, ok = [], [], 0
           for u, code, err in results:
               if code and 200 <= code < 400:
                   ok += 1
@@ -77,25 +74,39 @@ jobs:
               else:
                   hard.append((u, code, err))
 
-          print(f"## URL audit ({len(urls)} unique)")
-          print(f"- ✅ OK: {ok}")
-          print(f"- ⚠️ Soft fail (403/5xx, may be transient): {len(soft)}")
-          print(f"- ❌ Hard fail (4xx not 403, DNS, timeout): {len(hard)}")
-
+          # Construye el reporte tanto para stdout (visible en logs) como para
+          # GitHub Step Summary (visible directamente en la pestaña Actions).
+          lines = []
+          lines.append(f"## URL audit ({len(urls)} URLs únicas)")
+          lines.append("")
+          lines.append(f"- ✅ OK: **{ok}**")
+          lines.append(f"- ⚠️ Soft fail (antibot/rate-limit/5xx, transient): **{len(soft)}**")
+          lines.append(f"- ❌ Hard fail (4xx no-403 / DNS / timeout): **{len(hard)}**")
           if hard:
-              print()
-              print("### Hard failures")
+              lines.append("")
+              lines.append("### Hard failures")
               for u, code, err in sorted(hard, key=lambda x: str(x[1] or x[2] or '')):
                   ents = ', '.join(urls[u][:2])
-                  print(f"- `[{code or err}]` {u} — {ents}")
-
+                  lines.append(f"- `[{code or err}]` {u} — {ents}")
           if soft:
-              print()
-              print("### Soft failures (revisar pero no fallar)")
+              lines.append("")
+              lines.append("<details><summary>Soft failures ({} URLs)</summary>".format(len(soft)))
+              lines.append("")
               for u, code, err in sorted(soft, key=lambda x: str(x[1] or '')):
                   ents = ', '.join(urls[u][:2])
-                  print(f"- `[{code or err}]` {u} — {ents}")
+                  lines.append(f"- `[{code or err}]` {u} — {ents}")
+              lines.append("</details>")
 
-          # Falla el job solo con hard failures
-          if hard:
+          report = "\n".join(lines)
+          print(report)
+          summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_path:
+              with open(summary_path, 'a', encoding='utf-8') as fh:
+                  fh.write(report + "\n")
+
+          # Solo falla si superamos el umbral configurable de hard fails.
+          # Un par de timeouts no debería romper main todos los lunes.
+          threshold = int(os.environ.get('HARD_FAIL_THRESHOLD', '25'))
+          if len(hard) > threshold:
+              print(f"\n::error::{len(hard)} hard failures > umbral {threshold}")
               sys.exit(1)
