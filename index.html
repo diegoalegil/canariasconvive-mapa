@@ -37,7 +37,12 @@
     cursor: pointer; user-select: none;
   }
   .sector-list li:hover { background: #FAFAFA; }
-  .sector-list li.disabled { opacity: 0.4; }
+  .sector-list li.selected {
+    background: #F2F8F7;
+    box-shadow: inset 3px 0 0 #0D4E47;
+    padding-left: 7px;
+  }
+  .sector-list.has-selection li:not(.selected) { opacity: 0.5; }
   .sector-list .dot {
     width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
     border: 2px solid #FFF; box-shadow: 0 0 0 1px rgba(0,0,0,.15);
@@ -99,7 +104,7 @@
       <button id="btn-3d">3D</button>
       <button id="btn-fit">Centrar</button>
     </div>
-    <h2>Sectores (clica para filtrar)</h2>
+    <h2>Sectores · clica para filtrar a uno o varios</h2>
     <ul class="sector-list" id="sector-list"></ul>
     <p class="footer-note">
       Demo construido sobre <strong>Mapbox GL JS</strong> con un estilo custom diseñado para Canarias Convive. Marcadores coloreados por sector. Los grupos numerados son <em>clusters</em> automáticos (haz clic para ampliar).
@@ -142,7 +147,7 @@ const counts = {};
 GEOJSON.features.forEach(f => {
   counts[f.properties.sector] = (counts[f.properties.sector] || 0) + 1;
 });
-const activeFilters = new Set(Object.keys(counts));
+const activeFilters = new Set();
 const sectorList = document.getElementById('sector-list');
 Object.entries(counts).sort((a,b) => b[1]-a[1]).forEach(([sector, n]) => {
   const li = document.createElement('li');
@@ -153,11 +158,12 @@ Object.entries(counts).sort((a,b) => b[1]-a[1]).forEach(([sector, n]) => {
   li.addEventListener('click', () => {
     if (activeFilters.has(sector)) {
       activeFilters.delete(sector);
-      li.classList.add('disabled');
+      li.classList.remove('selected');
     } else {
       activeFilters.add(sector);
-      li.classList.remove('disabled');
+      li.classList.add('selected');
     }
+    sectorList.classList.toggle('has-selection', activeFilters.size > 0);
     updateFilter();
   });
   sectorList.appendChild(li);
@@ -299,7 +305,9 @@ map.on('load', () => {
     // Replace source data with filtered
     const filtered = {
       type: 'FeatureCollection',
-      features: GEOJSON.features.filter(f => activeFilters.has(f.properties.sector))
+      features: activeFilters.size === 0
+        ? GEOJSON.features
+        : GEOJSON.features.filter(f => activeFilters.has(f.properties.sector))
     };
     map.getSource('entities').setData(filtered);
     document.getElementById('total-count').textContent = filtered.features.length;
