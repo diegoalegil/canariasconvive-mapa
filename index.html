@@ -121,6 +121,10 @@
     cursor: pointer;
     transition: all 0.15s;
     gap: 10px;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    color: inherit;
   }
   .entity-card:hover {
     border-color: #0D4E47;
@@ -195,11 +199,20 @@
   .mapboxgl-popup-content .pop-links a:hover { text-decoration: underline; }
 
   .demo-banner {
-    position: absolute; top: 12px; right: 12px;
+    position: absolute; bottom: 12px; left: 12px;
     background: rgba(13, 78, 71, 0.95); color: #FFF;
     padding: 8px 14px; border-radius: 6px; font-size: 11px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 1px;
     z-index: 1; box-shadow: 0 2px 10px rgba(0,0,0,.2);
+    pointer-events: none;
+  }
+  :focus-visible {
+    outline: 2px solid #0D4E47;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  .sector-pill:focus-visible, .entity-card:focus-visible, .controls button:focus-visible, .back-button:focus-visible {
+    outline-offset: 2px;
   }
 
   .drag-handle { display: none; }
@@ -242,6 +255,9 @@
       height: 22px;
       cursor: pointer;
       flex-shrink: 0;
+      background: transparent;
+      border: 0;
+      width: 100%;
     }
     .drag-handle::before {
       content: '';
@@ -251,7 +267,7 @@
       background: #CCC; border-radius: 2px;
     }
     .sidebar-header { padding-top: 4px; }
-    .demo-banner { top: 12px; right: 12px; font-size: 10px; padding: 6px 10px; }
+    .demo-banner { bottom: 8px; left: 8px; font-size: 10px; padding: 6px 10px; }
   }
 
   .view-list { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
@@ -315,7 +331,7 @@
 <body>
 <div id="container">
   <aside id="sidebar">
-    <div class="drag-handle" id="drag-handle"></div>
+    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel"></button>
     <header class="sidebar-header">
       <h1>Canarias Convive</h1>
       <p>Mapa de agentes</p>
@@ -400,7 +416,7 @@ const SECTOR_COLORS = {
 
 function normalize(s) {
   return (s || '').toString().toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+    .normalize('NFC').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
 const LOGO_BASE = 'https://api.canariasconvive.com/rest/uploaded/entities/';
@@ -504,19 +520,18 @@ function initSidebar() {
 
   const islandList = document.getElementById('island-list');
   Object.entries(islandCounts).sort((a, b) => b[1] - a[1]).forEach(([island, n]) => {
-    const pill = document.createElement('span');
+    const pill = document.createElement('button');
+    pill.type = 'button';
     pill.className = 'sector-pill';
+    pill.setAttribute('aria-pressed', 'false');
     pill.style.setProperty('--c', '#0D4E47');
     pill.innerHTML = `<span>${escapeHTML(island)}</span><span class="count">${n}</span>`;
     pill.dataset.island = island;
     pill.addEventListener('click', () => {
-      if (activeIslands.has(island)) {
-        activeIslands.delete(island);
-        pill.classList.remove('selected');
-      } else {
-        activeIslands.add(island);
-        pill.classList.add('selected');
-      }
+      const selected = !activeIslands.has(island);
+      if (selected) activeIslands.add(island); else activeIslands.delete(island);
+      pill.classList.toggle('selected', selected);
+      pill.setAttribute('aria-pressed', String(selected));
       applyFilter();
       flyToIslands(activeIslands);
     });
@@ -526,19 +541,18 @@ function initSidebar() {
   const list = document.getElementById('sector-list');
   list.innerHTML = '';
   Object.entries(sectorCounts).sort((a, b) => b[1] - a[1]).forEach(([sector, n]) => {
-    const pill = document.createElement('span');
+    const pill = document.createElement('button');
+    pill.type = 'button';
     pill.className = 'sector-pill';
+    pill.setAttribute('aria-pressed', 'false');
     pill.style.setProperty('--c', SECTOR_COLORS[sector] || '#999');
     pill.innerHTML = `<span class="dot"></span><span>${escapeHTML(sector)}</span><span class="count">${n}</span>`;
     pill.dataset.sector = sector;
     pill.addEventListener('click', () => {
-      if (activeFilters.has(sector)) {
-        activeFilters.delete(sector);
-        pill.classList.remove('selected');
-      } else {
-        activeFilters.add(sector);
-        pill.classList.add('selected');
-      }
+      const selected = !activeFilters.has(sector);
+      if (selected) activeFilters.add(sector); else activeFilters.delete(sector);
+      pill.classList.toggle('selected', selected);
+      pill.setAttribute('aria-pressed', String(selected));
       applyFilter();
     });
     list.appendChild(pill);
@@ -569,11 +583,17 @@ function initSidebar() {
 
 function matchesSearch(props) {
   if (!searchQuery) return true;
-  const fields = [
-    props.name, props.sector, props.typology, props.protagonist,
-    props.municipality, props.province, props.address
-  ].map(normalize);
-  return fields.some(f => f.includes(searchQuery));
+  // Búsqueda primaria: nombre, municipio, provincia, dirección
+  const primary = [props.name, props.municipality, props.province, props.address].map(normalize);
+  if (primary.some(f => f.includes(searchQuery))) return true;
+  // Búsqueda secundaria: sector y protagonista (campos categóricos)
+  const secondary = [props.sector, props.protagonist].map(normalize);
+  if (secondary.some(f => f.includes(searchQuery))) return true;
+  // Tipología solo si query es lo bastante específica (≥5 chars) — evita 27 resultados al buscar "Cruz Roja"
+  if (searchQuery.length >= 5) {
+    return normalize(props.typology).includes(searchQuery);
+  }
+  return false;
 }
 
 function getFilteredFeatures() {
@@ -614,8 +634,10 @@ function renderEntityList(features) {
   sorted.slice(0, 120).forEach(f => {
     const p = f.properties;
     const color = SECTOR_COLORS[p.sector] || '#999';
-    const card = document.createElement('div');
+    const card = document.createElement('button');
+    card.type = 'button';
     card.className = 'entity-card';
+    card.setAttribute('aria-label', `${p.name}, ${p.sector}`);
     card.style.setProperty('--c', color);
     const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.island || p.sector;
     card.innerHTML = `
@@ -792,6 +814,10 @@ function initMap() {
 
   map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+
+  map.on('error', (e) => {
+    console.error('Mapbox error:', e && e.error || e);
+  });
 
   map.on('load', () => {
     map.setFog({
