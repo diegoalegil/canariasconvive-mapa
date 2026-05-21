@@ -507,7 +507,7 @@ function initSidebar() {
     const pill = document.createElement('span');
     pill.className = 'sector-pill';
     pill.style.setProperty('--c', '#0D4E47');
-    pill.innerHTML = `<span>${island}</span><span class="count">${n}</span>`;
+    pill.innerHTML = `<span>${escapeHTML(island)}</span><span class="count">${n}</span>`;
     pill.dataset.island = island;
     pill.addEventListener('click', () => {
       if (activeIslands.has(island)) {
@@ -529,7 +529,7 @@ function initSidebar() {
     const pill = document.createElement('span');
     pill.className = 'sector-pill';
     pill.style.setProperty('--c', SECTOR_COLORS[sector] || '#999');
-    pill.innerHTML = `<span class="dot"></span><span>${sector}</span><span class="count">${n}</span>`;
+    pill.innerHTML = `<span class="dot"></span><span>${escapeHTML(sector)}</span><span class="count">${n}</span>`;
     pill.dataset.sector = sector;
     pill.addEventListener('click', () => {
       if (activeFilters.has(sector)) {
