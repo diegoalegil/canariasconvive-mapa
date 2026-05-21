@@ -583,17 +583,14 @@ function initSidebar() {
 
 function matchesSearch(props) {
   if (!searchQuery) return true;
-  // Búsqueda primaria: nombre, municipio, provincia, dirección
-  const primary = [props.name, props.municipality, props.province, props.address].map(normalize);
-  if (primary.some(f => f.includes(searchQuery))) return true;
-  // Búsqueda secundaria: sector y protagonista (campos categóricos)
-  const secondary = [props.sector, props.protagonist].map(normalize);
-  if (secondary.some(f => f.includes(searchQuery))) return true;
-  // Tipología solo si query es lo bastante específica (≥5 chars) — evita 27 resultados al buscar "Cruz Roja"
-  if (searchQuery.length >= 5) {
-    return normalize(props.typology).includes(searchQuery);
-  }
-  return false;
+  // Búsqueda solo en campos de identidad: nombre, ubicación, sector, protagonista.
+  // No incluye typology porque su texto contiene ejemplos hardcoded ("Cáritas, Cruz Roja...")
+  // que generan falsos positivos masivos. Para filtrar por tipología, usar el panel de filtros explícito.
+  const fields = [
+    props.name, props.municipality, props.province, props.address,
+    props.sector, props.protagonist
+  ].map(normalize);
+  return fields.some(f => f.includes(searchQuery));
 }
 
 function getFilteredFeatures() {
@@ -689,7 +686,10 @@ function cleanUrl(u) {
 
 function cleanPhone(s) {
   if (!s) return '';
-  const v = String(s).trim().replace(/^(tel|telefono|tlf|telef)[:.\s]+/i, '').replace(/[^\d+\-()/\s]/g, '').replace(/\s+/g, ' ').trim();
+  let v = String(s).trim().replace(/^(tel|telefono|tlf|telef)[:.\s]+/i, '');
+  v = v.replace(/[^\d+\-()\s]/g, '');
+  v = v.replace(/\(\s*\)/g, '');
+  v = v.replace(/\s+/g, ' ').trim();
   const digits = v.replace(/\D/g, '');
   return digits.length >= 7 ? v : '';
 }
