@@ -264,6 +264,10 @@
         <button id="btn-3d">3D</button>
         <button id="btn-fit">Centrar</button>
       </div>
+      <details class="sector-filter" open>
+        <summary>Filtrar por isla</summary>
+        <div class="sector-pills" id="island-list"></div>
+      </details>
       <details class="sector-filter">
         <summary>Filtrar por sector</summary>
         <div class="sector-pills" id="sector-list"></div>
@@ -300,9 +304,45 @@ function normalize(s) {
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+function hashId(id) {
+  let h = 0;
+  const s = id || '';
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+function buildingFeature(f) {
+  const [lng, lat] = f.geometry.coordinates;
+  const sector = f.properties.sector;
+  const color = SECTOR_COLORS[sector] || '#999';
+  const h = hashId(f.properties.id);
+  const widthM = 26 + (h % 16);
+  const lengthM = 36 + ((h >> 4) % 24);
+  const rotation = (h >> 8) % 90;
+  const height = 45 + ((h >> 12) % 60);
+  const widthDeg = widthM / (111000 * Math.cos(lat * Math.PI / 180));
+  const lengthDeg = lengthM / 111000;
+  const rect = turf.bboxPolygon([
+    lng - widthDeg / 2, lat - lengthDeg / 2,
+    lng + widthDeg / 2, lat + lengthDeg / 2
+  ]);
+  const rotated = turf.transformRotate(rect, rotation, { pivot: [lng, lat] });
+  rotated.properties = {
+    id: f.properties.id,
+    sector,
+    color,
+    height
+  };
+  return rotated;
+}
+
 let GEOJSON = null;
 let map = null;
 let activeFilters = new Set();
+let activeIslands = new Set();
 let searchQuery = '';
 let currentMode = '2d';
 let zonesData = null;
@@ -317,19 +357,7 @@ async function load() {
 
   zonesData = {
     type: 'FeatureCollection',
-    features: GEOJSON.features.map(f => {
-      const c = f.geometry.coordinates;
-      const sector = f.properties.sector;
-      const color = SECTOR_COLORS[sector] || '#999';
-      const poly = turf.circle(c, 0.025, { steps: 18, units: 'kilometers' });
-      poly.properties = {
-        id: f.properties.id,
-        sector,
-        color,
-        height: 90
-      };
-      return poly;
-    })
+    features: GEOJSON.features.map(f => buildingFeature(f))
   };
 
   initSidebar();
@@ -337,13 +365,37 @@ async function load() {
 }
 
 function initSidebar() {
-  const counts = {};
+  const sectorCounts = {};
+  const islandCounts = {};
   GEOJSON.features.forEach(f => {
-    counts[f.properties.sector] = (counts[f.properties.sector] || 0) + 1;
+    sectorCounts[f.properties.sector] = (sectorCounts[f.properties.sector] || 0) + 1;
+    const isl = f.properties.island;
+    if (isl) islandCounts[isl] = (islandCounts[isl] || 0) + 1;
   });
+
+  const islandList = document.getElementById('island-list');
+  Object.entries(islandCounts).sort((a, b) => b[1] - a[1]).forEach(([island, n]) => {
+    const pill = document.createElement('span');
+    pill.className = 'sector-pill';
+    pill.style.setProperty('--c', '#0D4E47');
+    pill.innerHTML = `<span>${island}</span><span class="count">${n}</span>`;
+    pill.dataset.island = island;
+    pill.addEventListener('click', () => {
+      if (activeIslands.has(island)) {
+        activeIslands.delete(island);
+        pill.classList.remove('selected');
+      } else {
+        activeIslands.add(island);
+        pill.classList.add('selected');
+      }
+      applyFilter();
+    });
+    islandList.appendChild(pill);
+  });
+
   const list = document.getElementById('sector-list');
   list.innerHTML = '';
-  Object.entries(counts).sort((a, b) => b[1] - a[1]).forEach(([sector, n]) => {
+  Object.entries(sectorCounts).sort((a, b) => b[1] - a[1]).forEach(([sector, n]) => {
     const pill = document.createElement('span');
     pill.className = 'sector-pill';
     pill.style.setProperty('--c', SECTOR_COLORS[sector] || '#999');
@@ -390,6 +442,7 @@ function matchesSearch(props) {
 function getFilteredFeatures() {
   return GEOJSON.features.filter(f =>
     (activeFilters.size === 0 || activeFilters.has(f.properties.sector)) &&
+    (activeIslands.size === 0 || activeIslands.has(f.properties.island)) &&
     matchesSearch(f.properties)
   );
 }
@@ -515,6 +568,7 @@ function renderDetail(feature) {
       ${links ? `<div class="detail-section"><div class="detail-section-label">Enlaces</div><div class="detail-links-row">${links}</div></div>` : ''}
       <div class="detail-actions">
         <button class="detail-action primary" id="center-btn">Centrar en el mapa</button>
+        <a class="detail-action" id="gmaps-btn" href="https://www.google.com/maps/dir/?api=1&destination=${feature.geometry.coordinates[1]},${feature.geometry.coordinates[0]}" target="_blank" rel="noopener">Cómo llegar (Google Maps)</a>
       </div>
     </div>
   `;
