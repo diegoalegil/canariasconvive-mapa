@@ -4,8 +4,8 @@
 <meta charset="UTF-8" />
 <title>Canarias Convive — Mapa de agentes</title>
 <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
-<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet" />
-<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.css" rel="stylesheet" />
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.js"></script>
 <script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
@@ -113,14 +113,14 @@
     padding: 4px 16px 20px;
   }
   .entity-card {
-    display: flex; align-items: stretch;
-    padding: 12px;
+    display: flex; align-items: center;
+    padding: 10px 12px;
     background: #FFF;
     border: 1px solid #ECECEC; border-radius: 8px;
     margin-bottom: 8px;
     cursor: pointer;
     transition: all 0.15s;
-    gap: 12px;
+    gap: 10px;
   }
   .entity-card:hover {
     border-color: #0D4E47;
@@ -128,9 +128,21 @@
     transform: translateY(-1px);
   }
   .entity-card .sector-bar {
-    width: 4px; border-radius: 2px;
+    width: 4px; align-self: stretch; border-radius: 2px;
     background: var(--c, #999);
     flex-shrink: 0;
+  }
+  .entity-card .card-logo {
+    width: 44px; height: 44px; flex-shrink: 0;
+    border-radius: 8px; overflow: hidden;
+    background: var(--c, #999);
+    display: flex; align-items: center; justify-content: center;
+    color: #FFF; font-weight: 700; font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+  .entity-card .card-logo img {
+    width: 100%; height: 100%; object-fit: contain;
+    background: #FFF;
   }
   .entity-card .card-body { flex: 1; min-width: 0; }
   .entity-card .name {
@@ -188,6 +200,58 @@
     padding: 8px 14px; border-radius: 6px; font-size: 11px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 1px;
     z-index: 1; box-shadow: 0 2px 10px rgba(0,0,0,.2);
+  }
+
+  .drag-handle { display: none; }
+
+  .detail-logo-block {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 14px;
+  }
+  .detail-logo {
+    width: 64px; height: 64px;
+    border-radius: 12px; overflow: hidden;
+    background: var(--c, #999);
+    display: flex; align-items: center; justify-content: center;
+    color: #FFF; font-weight: 700; font-size: 22px;
+    flex-shrink: 0;
+  }
+  .detail-logo img { width: 100%; height: 100%; object-fit: contain; background: #FFF; }
+  .detail-logo-block .detail-name { margin: 0; flex: 1; }
+
+  @media (max-width: 768px) {
+    #container { flex-direction: column; height: 100vh; overflow: hidden; position: relative; }
+    #map { flex: 1; width: 100%; height: 100vh; }
+    #sidebar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      width: 100%;
+      height: 72vh;
+      border-right: 0;
+      border-top: 1px solid #E8E8E8;
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -8px 28px rgba(0,0,0,0.2);
+      transform: translateY(calc(100% - 138px));
+      transition: transform 0.32s cubic-bezier(.4,.0,.2,1);
+      z-index: 10;
+    }
+    #sidebar.expanded { transform: translateY(0); }
+    .drag-handle {
+      display: block;
+      position: relative;
+      height: 22px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .drag-handle::before {
+      content: '';
+      position: absolute;
+      top: 8px; left: 50%; transform: translateX(-50%);
+      width: 44px; height: 4px;
+      background: #CCC; border-radius: 2px;
+    }
+    .sidebar-header { padding-top: 4px; }
+    .demo-banner { top: 12px; right: 12px; font-size: 10px; padding: 6px 10px; }
   }
 
   .view-list { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
@@ -251,6 +315,7 @@
 <body>
 <div id="container">
   <aside id="sidebar">
+    <div class="drag-handle" id="drag-handle"></div>
     <header class="sidebar-header">
       <h1>Canarias Convive</h1>
       <p>Mapa de agentes</p>
@@ -302,6 +367,24 @@ const SECTOR_COLORS = {
 function normalize(s) {
   return (s || '').toString().toLowerCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+const LOGO_BASE = 'https://api.canariasconvive.com/rest/uploaded/entities/';
+const STOPWORDS = new Set(['de','del','la','las','el','los','y','en','a','al','con','para','por','un','una']);
+
+function getInitials(name) {
+  const words = (name || '').split(/\s+/).filter(w => w && /[A-Za-zÀ-ÿ]/.test(w[0]) && !STOPWORDS.has(w.toLowerCase()));
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+function buildLogoHTML(p) {
+  const initials = getInitials(p.name);
+  if (p.logo) {
+    return `<img src="${LOGO_BASE}${escapeHTML(p.logo)}.png" loading="lazy" alt="" onerror="this.parentNode.classList.add('no-logo');this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='flex');" /><span class="logo-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;">${initials}</span>`;
+  }
+  return `<span>${initials}</span>`;
 }
 
 function hashId(id) {
@@ -419,6 +502,13 @@ function initSidebar() {
     applyFilter();
   });
 
+  const dragHandle = document.getElementById('drag-handle');
+  if (dragHandle) {
+    dragHandle.addEventListener('click', () => {
+      document.getElementById('sidebar').classList.toggle('expanded');
+    });
+  }
+
   document.getElementById('btn-2d').addEventListener('click', () => setView('2d'));
   document.getElementById('btn-3d').addEventListener('click', () => setView('3d'));
   document.getElementById('btn-fit').addEventListener('click', () => {
@@ -483,6 +573,7 @@ function renderEntityList(features) {
     const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.sector;
     card.innerHTML = `
       <div class="sector-bar"></div>
+      <div class="card-logo">${buildLogoHTML(p)}</div>
       <div class="card-body">
         <div class="name">${escapeHTML(p.name)}</div>
         <div class="location">${escapeHTML(loc)}</div>
@@ -558,7 +649,10 @@ function renderDetail(feature) {
   return `
     <button class="back-button" id="back-btn"><span class="arrow">←</span> Volver al listado</button>
     <div class="detail-content">
-      <h2 class="detail-name">${escapeHTML(p.name)}</h2>
+      <div class="detail-logo-block">
+        <div class="detail-logo" style="--c:${color}">${buildLogoHTML(p)}</div>
+        <h2 class="detail-name">${escapeHTML(p.name)}</h2>
+      </div>
       <div class="detail-pill" style="background:${color}">${escapeHTML(p.sector)}</div>
       ${p.typology ? `<div class="detail-section"><div class="detail-section-label">Tipología</div><div class="detail-section-value">${escapeHTML(p.typology)}</div></div>` : ''}
       ${p.protagonist ? `<div class="detail-section"><div class="detail-section-label">Protagonista</div><div class="detail-section-value">${escapeHTML(p.protagonist)}</div></div>` : ''}
@@ -581,6 +675,9 @@ function showDetail(feature) {
   viewList.classList.add('hidden');
   viewDetail.classList.add('active');
   viewDetail.scrollTop = 0;
+  if (window.innerWidth <= 768) {
+    document.getElementById('sidebar').classList.add('expanded');
+  }
   document.getElementById('back-btn').addEventListener('click', hideDetail);
   document.getElementById('center-btn').addEventListener('click', () => flyToFeature(feature));
 }
