@@ -21,7 +21,7 @@ jobs:
           # Solo falla el job si hay más de N hard fails. Algunos servidores
           # de ONG dan timeout intermitente desde la IP de GitHub Actions
           # aunque estén vivos en navegador; no queremos ruido constante.
-          HARD_FAIL_THRESHOLD: '25'
+          HARD_FAIL_THRESHOLD: '5'
         shell: python {0}
         run: |
           import json, os, ssl, sys, urllib.error, urllib.request, socket
@@ -63,13 +63,17 @@ jobs:
           # Soft fails: códigos transitorios + hosts antibot conocidos.
           SOFT_CODES = {403, 405, 429, 999}
           ANTIBOT_HOSTS = ('instagram.com', 'facebook.com', 'linkedin.com', 'x.com', 'twitter.com')
+          # Sitios vivos desde navegador pero que rechazan las IPs de los
+          # runners de GitHub Actions (firewall / WAF / geo). Se tratan como
+          # soft fail para no ensuciar el reporte semanal.
+          GEO_BLOCKED_HOSTS = ('casafrica.es', 'iass.es', 'uerca.org')
           hard, soft, ok = [], [], 0
           for u, code, err in results:
               if code and 200 <= code < 400:
                   ok += 1
               elif code in SOFT_CODES or (code and 500 <= code < 600):
                   soft.append((u, code, err))
-              elif any(h in u for h in ANTIBOT_HOSTS):
+              elif any(h in u for h in ANTIBOT_HOSTS + GEO_BLOCKED_HOSTS):
                   soft.append((u, code, err))
               else:
                   hard.append((u, code, err))
