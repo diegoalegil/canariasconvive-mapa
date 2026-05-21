@@ -139,9 +139,14 @@
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  .entity-card .location {
+    font-size: 11.5px; color: var(--c, #999);
+    font-weight: 600; line-height: 1.3;
+  }
   .entity-card .sector-label {
-    font-size: 10.5px; color: var(--c, #999);
-    font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    font-size: 9.5px; color: #888;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    margin-top: 4px;
   }
 
   .empty {
@@ -375,7 +380,10 @@ function initSidebar() {
 
 function matchesSearch(props) {
   if (!searchQuery) return true;
-  const fields = [props.name, props.sector, props.typology, props.protagonist].map(normalize);
+  const fields = [
+    props.name, props.sector, props.typology, props.protagonist,
+    props.municipality, props.province, props.address
+  ].map(normalize);
   return fields.some(f => f.includes(searchQuery));
 }
 
@@ -419,11 +427,13 @@ function renderEntityList(features) {
     const card = document.createElement('div');
     card.className = 'entity-card';
     card.style.setProperty('--c', color);
+    const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.sector;
     card.innerHTML = `
       <div class="sector-bar"></div>
       <div class="card-body">
-        <div class="name">${p.name}</div>
-        <div class="sector-label">${p.sector}</div>
+        <div class="name">${escapeHTML(p.name)}</div>
+        <div class="location">${escapeHTML(loc)}</div>
+        ${p.municipality ? `<div class="sector-label">${escapeHTML(p.sector)}</div>` : ''}
       </div>
     `;
     card.addEventListener('click', () => {
@@ -442,8 +452,6 @@ function renderEntityList(features) {
   list.appendChild(frag);
 }
 
-const enrichedCache = new Map();
-
 function flyToFeature(f) {
   const coords = f.geometry.coordinates;
   const pitchKeep = currentMode === '3d' ? 65 : 0;
@@ -457,12 +465,12 @@ function escapeHTML(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function buildLinkChip(href, label, type) {
+function buildLinkChip(href, label) {
   if (!href) return '';
   return `<a class="detail-link-chip" href="${escapeHTML(href)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
-function renderDetail(feature, enriched) {
+function renderDetail(feature) {
   const p = feature.properties;
   const color = SECTOR_COLORS[p.sector] || '#999';
   const links = [
@@ -472,19 +480,26 @@ function renderDetail(feature, enriched) {
     buildLinkChip(p.twitter, 'Twitter')
   ].filter(Boolean).join('');
 
-  const address = enriched && enriched.address
-    ? `<div class="detail-section"><div class="detail-section-label">Dirección</div><div class="detail-section-value">${escapeHTML(enriched.address)}</div></div>`
-    : '<div class="detail-section" id="d-address"><div class="detail-section-label">Dirección</div><div class="detail-section-value loading">Cargando…</div></div>';
+  // Address may come as a string or as a list — normalize
+  let phones = p.phones || [];
+  let emails = p.emails || [];
+  if (typeof phones === 'string') { try { phones = JSON.parse(phones); } catch(e) { phones = phones ? [phones] : []; } }
+  if (typeof emails === 'string') { try { emails = JSON.parse(emails); } catch(e) { emails = emails ? [emails] : []; } }
 
-  let contactsHTML = '';
-  if (enriched) {
-    const phones = (enriched.contacts || []).map(c => c.contact).filter(Boolean);
-    const emails = (enriched.contacts || []).map(c => c.email).filter(Boolean);
-    if (phones.length) contactsHTML += `<div class="detail-section"><div class="detail-section-label">Teléfono</div><div class="detail-section-value">${phones.map(x => `<a href="tel:${escapeHTML(x.replace(/\s/g,''))}" style="color:#0D4E47;text-decoration:none;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
-    if (emails.length) contactsHTML += `<div class="detail-section"><div class="detail-section-label">Email</div><div class="detail-section-value">${emails.map(x => `<a href="mailto:${escapeHTML(x)}" style="color:#F55654;text-decoration:none;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
-    if (!phones.length && !emails.length) contactsHTML = '<div class="detail-section"><div class="detail-section-label">Contacto</div><div class="detail-section-value empty">Sin datos</div></div>';
-  } else {
-    contactsHTML = '<div class="detail-section" id="d-contacts"><div class="detail-section-label">Contacto</div><div class="detail-section-value loading">Cargando…</div></div>';
+  const locationParts = [p.municipality, p.province].filter(Boolean).join(', ');
+  const fullAddress = p.address || locationParts || '';
+
+  const addressBlock = fullAddress
+    ? `<div class="detail-section"><div class="detail-section-label">Dirección</div><div class="detail-section-value">${escapeHTML(fullAddress)}</div></div>`
+    : (locationParts ? `<div class="detail-section"><div class="detail-section-label">Ubicación</div><div class="detail-section-value">${escapeHTML(locationParts)}</div></div>` : '');
+
+  let phonesBlock = '';
+  if (phones.length) {
+    phonesBlock = `<div class="detail-section"><div class="detail-section-label">Teléfono</div><div class="detail-section-value">${phones.map(x => `<a href="tel:${escapeHTML(x.replace(/\s/g,''))}" style="color:#0D4E47;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
+  }
+  let emailsBlock = '';
+  if (emails.length) {
+    emailsBlock = `<div class="detail-section"><div class="detail-section-label">Email</div><div class="detail-section-value">${emails.map(x => `<a href="mailto:${escapeHTML(x)}" style="color:#F55654;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
   }
 
   return `
@@ -494,8 +509,9 @@ function renderDetail(feature, enriched) {
       <div class="detail-pill" style="background:${color}">${escapeHTML(p.sector)}</div>
       ${p.typology ? `<div class="detail-section"><div class="detail-section-label">Tipología</div><div class="detail-section-value">${escapeHTML(p.typology)}</div></div>` : ''}
       ${p.protagonist ? `<div class="detail-section"><div class="detail-section-label">Protagonista</div><div class="detail-section-value">${escapeHTML(p.protagonist)}</div></div>` : ''}
-      ${address}
-      ${contactsHTML}
+      ${addressBlock}
+      ${phonesBlock}
+      ${emailsBlock}
       ${links ? `<div class="detail-section"><div class="detail-section-label">Enlaces</div><div class="detail-links-row">${links}</div></div>` : ''}
       <div class="detail-actions">
         <button class="detail-action primary" id="center-btn">Centrar en el mapa</button>
@@ -504,39 +520,15 @@ function renderDetail(feature, enriched) {
   `;
 }
 
-async function showDetail(feature) {
+function showDetail(feature) {
   const viewList = document.getElementById('view-list');
   const viewDetail = document.getElementById('view-detail');
-  const p = feature.properties;
-
-  const cached = enrichedCache.get(p.id);
-  viewDetail.innerHTML = renderDetail(feature, cached || null);
+  viewDetail.innerHTML = renderDetail(feature);
   viewList.classList.add('hidden');
   viewDetail.classList.add('active');
   viewDetail.scrollTop = 0;
-
   document.getElementById('back-btn').addEventListener('click', hideDetail);
   document.getElementById('center-btn').addEventListener('click', () => flyToFeature(feature));
-
-  if (!cached) {
-    try {
-      const resp = await fetch(`https://api.canariasconvive.com/rest/entity/${p.id}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        enrichedCache.set(p.id, data);
-        if (viewDetail.classList.contains('active') && viewDetail.querySelector('.detail-name')?.textContent === p.name) {
-          viewDetail.innerHTML = renderDetail(feature, data);
-          document.getElementById('back-btn').addEventListener('click', hideDetail);
-          document.getElementById('center-btn').addEventListener('click', () => flyToFeature(feature));
-        }
-      }
-    } catch (e) {
-      const addrEl = viewDetail.querySelector('#d-address .detail-section-value');
-      const contactEl = viewDetail.querySelector('#d-contacts .detail-section-value');
-      if (addrEl) { addrEl.classList.remove('loading'); addrEl.classList.add('empty'); addrEl.textContent = 'No disponible'; }
-      if (contactEl) { contactEl.classList.remove('loading'); contactEl.classList.add('empty'); contactEl.textContent = 'No disponible'; }
-    }
-  }
 }
 
 function hideDetail() {
