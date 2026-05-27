@@ -104,6 +104,9 @@
   }
   .sector-pill.selected .dot { background: #FFF; box-shadow: none; }
   .sector-pill .count { font-size: 10px; opacity: 0.75; margin-left: 2px; }
+  /* Atenúa pills cuyo conteo facetado por filtros activos es 0. Sigue
+     siendo clicable por si el usuario quiere combinar con su selección. */
+  .sector-pill.empty:not(.selected) { opacity: 0.4; }
 
   .results-header {
     padding: 12px 24px 8px;
@@ -397,7 +400,7 @@
         <summary>Filtrar por isla</summary>
         <div class="sector-pills" id="island-list" role="group" aria-label="Filtrar por isla"></div>
       </details>
-      <details class="sector-filter">
+      <details class="sector-filter" open>
         <summary>Filtrar por sector</summary>
         <div class="sector-pills" id="sector-list" role="group" aria-label="Filtrar por sector"></div>
       </details>
@@ -852,6 +855,41 @@ function getFilteredFeatures() {
   );
 }
 
+// Recalcula los conteos de cada pill (isla / sector) excluyendo el filtro de
+// la misma dimensión: si filtras por "Tenerife", las pills de sector muestran
+// cuántas entidades hay EN Tenerife por sector; viceversa para sector. Así la
+// leyenda funciona como guía contextual del subset visible.
+function updateFacetedCounts() {
+  if (!GEOJSON) return;
+  const matches = (f, ignoreKey) => {
+    if (ignoreKey !== 'sector' && activeFilters.size > 0 && !activeFilters.has(f.properties.sector)) return false;
+    if (ignoreKey !== 'island' && activeIslands.size > 0 && !activeIslands.has(f.properties.island)) return false;
+    if (!matchesSearch(f.properties)) return false;
+    return true;
+  };
+  const sectorCounts = {};
+  const islandCounts = {};
+  GEOJSON.features.forEach(f => {
+    if (matches(f, 'sector')) {
+      sectorCounts[f.properties.sector] = (sectorCounts[f.properties.sector] || 0) + 1;
+    }
+    if (matches(f, 'island')) {
+      const isl = f.properties.island;
+      if (isl) islandCounts[isl] = (islandCounts[isl] || 0) + 1;
+    }
+  });
+  const updatePill = (selector, counts, key) => {
+    document.querySelectorAll(selector).forEach(p => {
+      const n = counts[p.dataset[key]] || 0;
+      const countEl = p.querySelector('.count');
+      if (countEl) countEl.textContent = n;
+      p.classList.toggle('empty', n === 0);
+    });
+  };
+  updatePill('.sector-pill[data-sector]', sectorCounts, 'sector');
+  updatePill('.sector-pill[data-island]', islandCounts, 'island');
+}
+
 function applyFilter() {
   const filtered = getFilteredFeatures();
   if (map && map.getSource('entities')) {
@@ -869,6 +907,7 @@ function applyFilter() {
   }
   document.getElementById('results-count').textContent = filtered.length;
   renderEntityList(filtered);
+  updateFacetedCounts();
   // Muestra el botón "Limpiar filtros" solo cuando hay alguno activo.
   const btnClear = document.getElementById('btn-clear-filters');
   if (btnClear) btnClear.hidden = !hasActiveFilters();
