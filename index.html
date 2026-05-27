@@ -158,6 +158,11 @@
     box-shadow: 0 3px 12px rgba(13,78,71,0.1);
     transform: translateY(-1px);
   }
+  .entity-card.selected {
+    border-color: var(--c, #0D4E47);
+    background: #F7FAF9;
+    box-shadow: 0 0 0 1px var(--c, #0D4E47), 0 3px 12px rgba(13,78,71,0.12);
+  }
   .entity-card .sector-bar {
     width: 4px; align-self: stretch; border-radius: 2px;
     background: var(--c, #999);
@@ -527,6 +532,31 @@ let currentMode = '2d';
 let zonesData = null;
 const seenMapErrors = new Set();
 
+// Id de la entidad actualmente seleccionada (panel de detalle abierto).
+// Se usa para sincronizar el halo en el mapa y la clase .selected en la card.
+let selectedEntityId = null;
+
+// Marca una entidad como seleccionada y refleja el cambio en mapa + lista.
+// Pasar null deselecciona todo.
+function setSelectedEntity(id) {
+  selectedEntityId = id || null;
+  if (map && map.getLayer('selected-halo')) {
+    map.setFilter('selected-halo', ['==', ['get', 'id'], selectedEntityId || '__none__']);
+  }
+  // Lista: quita .selected de todas y aplica a la card actual (si está visible).
+  document.querySelectorAll('.entity-card.selected').forEach(c => {
+    c.classList.remove('selected');
+    c.removeAttribute('aria-pressed');
+  });
+  if (selectedEntityId) {
+    const card = document.querySelector(`.entity-card[data-id="${CSS.escape(selectedEntityId)}"]`);
+    if (card) {
+      card.classList.add('selected');
+      card.setAttribute('aria-pressed', 'true');
+    }
+  }
+}
+
 // Bounds de Canarias con un poco de aire para que el usuario pueda navegar
 // sin perderse en el Atlántico. Estos bounds se usan como vista por defecto
 // y como maxBounds del mapa para evitar que el usuario acabe en África.
@@ -839,7 +869,9 @@ function renderEntityList(features) {
     const color = SECTOR_COLORS[p.sector] || '#999';
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = 'entity-card';
+    card.className = 'entity-card' + (p.id === selectedEntityId ? ' selected' : '');
+    card.dataset.id = p.id;
+    if (p.id === selectedEntityId) card.setAttribute('aria-pressed', 'true');
     card.setAttribute('aria-label', `${p.name}, ${p.sector}`);
     card.style.setProperty('--c', color);
     const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.island || p.sector;
@@ -1030,11 +1062,9 @@ function showDetail(feature, opts = {}) {
   const backBtn = document.getElementById('back-btn');
   backBtn.addEventListener('click', hideDetail);
   document.getElementById('center-btn').addEventListener('click', () => flyToFeature(feature));
-  // Mueve el foco al botón "Volver" para que lectores de pantalla anuncien
-  // el cambio de vista y la navegación por teclado entre por un control útil.
   setTimeout(() => backBtn.focus(), 0);
-  // Refleja la entidad en la URL para que sea compartible (?entity=<id>).
-  // opts.skipUrl evita un loop cuando ya llegamos aquí leyendo la URL.
+  // Marca la entidad como seleccionada (halo en mapa + card resaltada).
+  setSelectedEntity(feature.properties.id);
   if (!opts.skipUrl) {
     const id = feature.properties.id;
     if (id) {
@@ -1053,7 +1083,8 @@ function hideDetail() {
   viewDetail.innerHTML = '';
   const search = document.getElementById('search');
   if (search) setTimeout(() => search.focus(), 0);
-  // Limpia el param de la URL al volver a la lista.
+  // Deselecciona la entidad y limpia el param de la URL al volver a la lista.
+  setSelectedEntity(null);
   const url = new URL(window.location.href);
   if (url.searchParams.has('entity')) {
     url.searchParams.delete('entity');
@@ -1210,6 +1241,23 @@ function initMap() {
     const colorExpr = ['match', ['get', 'sector']];
     Object.entries(SECTOR_COLORS).forEach(([s, c]) => colorExpr.push(s, c));
     colorExpr.push('#999999');
+
+    // Halo de la entidad seleccionada: queda debajo del punto y se hace visible
+    // por filter cuando setSelectedEntity asigna un id. Antes el usuario no
+    // tenía feedback visual de qué marcador estaba mirando en la ficha.
+    map.addLayer({
+      id: 'selected-halo',
+      type: 'circle',
+      source: 'entities',
+      filter: ['==', ['get', 'id'], '__none__'],
+      paint: {
+        'circle-color': 'rgba(13, 78, 71, 0.18)',
+        'circle-radius': 22,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#0D4E47',
+        'circle-stroke-opacity': 0.7
+      }
+    });
 
     map.addLayer({
       id: 'unclustered-point',
