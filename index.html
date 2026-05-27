@@ -481,11 +481,29 @@ function getInitials(name) {
 }
 
 function buildLogoHTML(p) {
-  const initials = getInitials(p.name);
+  const initials = escapeHTML(getInitials(p.name));
   if (p.logo) {
-    return `<img src="${LOGO_BASE}${escapeHTML(p.logo)}.png" loading="lazy" alt="" onerror="this.parentNode.classList.add('no-logo');this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='flex');" /><span class="logo-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;">${initials}</span>`;
+    // Sin onerror inline para permitir Content-Security-Policy estricta sin
+    // 'unsafe-inline'. El fallback se cablea con addEventListener después de
+    // insertar el HTML, vía attachLogoFallbacks().
+    return `<img class="logo-img" src="${LOGO_BASE}${escapeHTML(p.logo)}.png" loading="lazy" alt="" /><span class="logo-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;">${initials}</span>`;
   }
   return `<span>${initials}</span>`;
+}
+
+// Wire el fallback de logo (img → iniciales) a cada <img.logo-img> dentro de
+// `container`. Reemplaza al antiguo onerror inline, que bloquea CSP estricta.
+function attachLogoFallbacks(container) {
+  if (!container) return;
+  container.querySelectorAll('img.logo-img').forEach(img => {
+    img.addEventListener('error', () => {
+      const parent = img.parentNode;
+      if (parent) parent.classList.add('no-logo');
+      img.style.display = 'none';
+      const fallback = img.nextElementSibling;
+      if (fallback) fallback.style.display = 'flex';
+    }, { once: true });
+  });
 }
 
 function hashId(id) {
@@ -884,6 +902,7 @@ function renderEntityList(features) {
         ${(p.municipality || p.island) ? `<div class="sector-label">${escapeHTML(p.sector)}</div>` : ''}
       </div>
     `;
+    attachLogoFallbacks(card);
     card.addEventListener('click', () => {
       flyToFeature(f);
       showDetail(f);
@@ -1049,6 +1068,7 @@ function showDetail(feature, opts = {}) {
   const viewList = document.getElementById('view-list');
   const viewDetail = document.getElementById('view-detail');
   viewDetail.innerHTML = renderDetail(feature);
+  attachLogoFallbacks(viewDetail);
   viewDetail.setAttribute('tabindex', '-1');
   viewList.classList.add('hidden');
   viewDetail.classList.add('active');
