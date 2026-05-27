@@ -110,8 +110,29 @@
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.9px;
     color: #5F6B68; font-weight: 700;
     background: #FFF;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
   .results-header strong { color: #0D4E47; font-weight: 700; }
+  .btn-clear {
+    background: transparent;
+    border: 1px solid #C8D2CF;
+    border-radius: 100px;
+    padding: 4px 11px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #0D4E47;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+  .btn-clear:hover, .btn-clear:focus-visible {
+    background: #0D4E47;
+    color: #FFF;
+    border-color: #0D4E47;
+  }
+  .btn-clear[hidden] { display: none; }
 
   .entity-list {
     flex: 1;
@@ -375,7 +396,10 @@
         <summary>Filtrar por sector</summary>
         <div class="sector-pills" id="sector-list" role="group" aria-label="Filtrar por sector"></div>
       </details>
-      <div class="results-header" aria-live="polite"><strong id="results-count">—</strong> entidades</div>
+      <div class="results-header" aria-live="polite">
+        <span><strong id="results-count">—</strong> entidades</span>
+        <button type="button" id="btn-clear-filters" class="btn-clear" hidden>Limpiar filtros</button>
+      </div>
       <div class="entity-list" id="entity-list"></div>
     </div>
     <div class="view-detail" id="view-detail"></div>
@@ -630,6 +654,7 @@ function initSidebar() {
       pill.classList.toggle('selected', selected);
       pill.setAttribute('aria-pressed', String(selected));
       applyFilter();
+      syncFilterStateToUrl();
       flyToIslands(activeIslands);
     });
     islandList.appendChild(pill);
@@ -651,6 +676,7 @@ function initSidebar() {
       pill.classList.toggle('selected', selected);
       pill.setAttribute('aria-pressed', String(selected));
       applyFilter();
+      syncFilterStateToUrl();
     });
     list.appendChild(pill);
   });
@@ -658,6 +684,7 @@ function initSidebar() {
   document.getElementById('search').addEventListener('input', (e) => {
     searchQuery = normalize(e.target.value);
     applyFilter();
+    syncFilterStateToUrl();
   });
 
   const dragHandle = document.getElementById('drag-handle');
@@ -679,6 +706,82 @@ function initSidebar() {
     setTowersVisible(false);
     if (map) map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
   });
+
+  const btnClear = document.getElementById('btn-clear-filters');
+  if (btnClear) btnClear.addEventListener('click', clearAllFilters);
+
+  // Restaura el estado de filtros desde la URL: marca las pills correspondientes,
+  // rellena el input de búsqueda y actualiza los sets internos. Se llama al final
+  // de initSidebar para que ya existan las pills en el DOM.
+  const initial = getFilterStateFromUrl();
+  initial.islands.forEach(i => {
+    if (islandCounts[i]) activeIslands.add(i);
+  });
+  initial.sectors.forEach(s => {
+    if (sectorCounts[s]) activeFilters.add(s);
+  });
+  searchQuery = normalize(initial.q);
+  document.querySelectorAll('.sector-pill[data-island]').forEach(p => {
+    if (activeIslands.has(p.dataset.island)) {
+      p.classList.add('selected');
+      p.setAttribute('aria-pressed', 'true');
+    }
+  });
+  document.querySelectorAll('.sector-pill[data-sector]').forEach(p => {
+    if (activeFilters.has(p.dataset.sector)) {
+      p.classList.add('selected');
+      p.setAttribute('aria-pressed', 'true');
+    }
+  });
+  if (initial.q) {
+    const search = document.getElementById('search');
+    if (search) search.value = initial.q;
+  }
+}
+
+// Estado compartido en URL — permite copiar/pegar la dirección y reproducir
+// exactamente la vista filtrada que tenía un usuario. Los Sets se serializan
+// con coma como separador (los valores no contienen comas en este dataset).
+function getFilterStateFromUrl() {
+  const p = new URLSearchParams(window.location.search);
+  const split = s => s ? s.split(',').map(x => x.trim()).filter(Boolean) : [];
+  return {
+    islands: split(p.get('island')),
+    sectors: split(p.get('sector')),
+    q: p.get('q') || ''
+  };
+}
+
+function syncFilterStateToUrl() {
+  const url = new URL(window.location.href);
+  const setOrDelete = (key, value) => {
+    if (value && value.length) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  };
+  setOrDelete('island', [...activeIslands].join(','));
+  setOrDelete('sector', [...activeFilters].join(','));
+  setOrDelete('q', searchQuery);
+  // replaceState (no pushState) para no llenar el historial con cada tecla.
+  history.replaceState(null, '', url.toString());
+}
+
+function hasActiveFilters() {
+  return activeIslands.size > 0 || activeFilters.size > 0 || searchQuery.length > 0;
+}
+
+function clearAllFilters() {
+  activeIslands.clear();
+  activeFilters.clear();
+  searchQuery = '';
+  // UI: deseleccionar todas las pills marcadas y vaciar el input de búsqueda.
+  document.querySelectorAll('.sector-pill.selected').forEach(p => {
+    p.classList.remove('selected');
+    p.setAttribute('aria-pressed', 'false');
+  });
+  const search = document.getElementById('search');
+  if (search) search.value = '';
+  applyFilter();
+  syncFilterStateToUrl();
 }
 
 function matchesSearch(props) {
@@ -718,6 +821,9 @@ function applyFilter() {
   }
   document.getElementById('results-count').textContent = filtered.length;
   renderEntityList(filtered);
+  // Muestra el botón "Limpiar filtros" solo cuando hay alguno activo.
+  const btnClear = document.getElementById('btn-clear-filters');
+  if (btnClear) btnClear.hidden = !hasActiveFilters();
 }
 
 function renderEntityList(features) {
@@ -1145,6 +1251,8 @@ function initMap() {
     });
 
     applyFilter();
+    // Si la URL trajo islas filtradas, vuela a ellas al cargar el mapa.
+    if (activeIslands.size > 0) flyToIslands(activeIslands);
   });
 }
 
