@@ -24,9 +24,9 @@ Este repo es una demo standalone que rediseña esa experiencia:
 - **Marcadores coloreados por sector** — el sector de cada entidad se reconoce de un vistazo por el color del punto.
 - **Vista 3D con terreno real** — Mapbox DEM con exageración 2.5× muestra el Teide, la Caldera de Taburiente y el resto de volcanes en perspectiva. Edificios sector-coloreados se alzan desde cada marcador.
 - **Filtros combinables** por sector y por isla. Al filtrar por isla, la cámara vuela hasta ella.
-- **Búsqueda fuzzy** sin acentos, por nombre, municipio, provincia o dirección.
+- **Búsqueda por substring** insensible a acentos y mayúsculas, contra nombre, municipio, provincia, dirección, sector y protagonista.
 - **Panel de detalle** lateral con dirección, teléfono, email, redes sociales, logo y botón "Cómo llegar" que abre Google Maps con direcciones.
-- **Responsive mobile** — en móviles el sidebar se convierte en una bottom sheet deslizable.
+- **Responsive mobile** — en móviles el sidebar se convierte en una bottom sheet expandible (tap en el handle para alternar).
 - **Accesibilidad** — pills y cards son `<button>` con `aria-pressed`, foco visible con `:focus-visible`, viewport sin bloquear zoom del usuario.
 
 ## Tecnología
@@ -64,7 +64,11 @@ Para clonar y servir la demo con tu propio token de Mapbox:
 
 ## Roadmap
 
-- [ ] Compartir un agente concreto vía URL (`?entity={uuid}`).
+- [x] Compartir un agente concreto vía URL (`?entity={uuid}`).
+- [x] CI semanal que audita los 386 enlaces externos del geojson.
+- [ ] Persistir filtros (isla/sector/búsqueda) en la URL.
+- [ ] Leyenda persistente con conteos por sector vinculados al filtro activo.
+- [ ] Estado seleccionado sincronizado entre marcador y card.
 - [ ] Cache local de datos (Service Worker) para que cargue offline.
 - [ ] GitHub Actions que refresca `entities.geojson` cada noche.
 - [ ] Búsqueda con puntuación ponderada (nombre prioritario sobre tipología).
