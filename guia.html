@@ -191,7 +191,7 @@
         <li>La entidad rellena el <b>formulario</b> (o lo rellenas tú por ella). Su respuesta aparece en la hoja de peticiones.</li>
         <li>En esa hoja, en la fila de la nueva entidad, rellena con los desplegables: <b>Sector</b>, <b>Tipología</b> y <b>Protagonista</b>.</li>
         <li>Pon la columna <b>Estado</b> = <b>«Aprobado»</b>. (Las que no apruebes se quedan esperando, no pasa nada.)</li>
-        <li>Menú <b>«Canarias Convive» → «Promover aprobadas»</b>. El sistema busca la dirección, calcula sus coordenadas, le da un identificador y la copia a la hoja oficial.</li>
+        <li>En el menú propio de la hoja de peticiones (el de cada proyecto; en Canarias Convive se llama <b>«Canarias Convive»</b>) → <b>«Promover aprobadas»</b>. El sistema busca la dirección, calcula sus coordenadas, le da un identificador y la copia a la hoja oficial.</li>
         <li>En la siguiente actualización (hasta 1 hora) aparece en el mapa.</li>
       </ol>
       <div class="callout warn">⚠️ Si al promover dice <b>«0 movidas»</b>, casi siempre es porque a esa fila le falta poner <b>Estado = Aprobado</b>. No promueve nada que no esté aprobado.</div>
@@ -257,7 +257,7 @@
       </ul>
       <h3>Scripts de la hoja (Apps Script)</h3>
       <ul>
-        <li>Las hojas tienen un menú propio: <b>«Canarias Convive»</b>. En la oficial → «Formatear hoja»; en la de peticiones → «Preparar hoja» y «Promover aprobadas».</li>
+        <li>Cada hoja tiene su propio menú (en Canarias Convive se llama <b>«Canarias Convive»</b>): en la oficial → «Formatear hoja»; en la de peticiones → «Preparar hoja» y «Promover aprobadas».</li>
         <li>«Promover» geocodifica la dirección, genera un identificador y vuelca la fila al esquema de la hoja oficial.</li>
         <li>Los desplegables se aplican hasta 10.000 filas, para que las altas futuras ya los tengan.</li>
       </ul>
