@@ -1,0 +1,131 @@
+name: Sync Sheet → entities.geojson
+
+# Lee el Google Sheet "Canarias Convive" (carpeta Mapas en la unidad compartida)
+# y regenera entities.geojson. Si hay cambios respecto a lo que está en git,
+# commitea. Así el Sheet es la fuente de verdad editable por humanos y el mapa
+# (que carga entities.geojson) refleja los cambios en la siguiente ejecución.
+
+on:
+  schedule:
+    # Cada hora en punto. Bajar a '*/15 * * * *' si se quiere más reactivo.
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+# Necesario para que el job pueda commitear el geojson regenerado.
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias de Google
+        run: pip install --quiet google-auth google-api-python-client
+
+      - name: Generar entities.geojson desde el Sheet
+        env:
+          # JSON del service account. Se añade en Settings → Secrets and
+          # variables → Actions → New repository secret. Nunca se commitea.
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SHEET_ID: '1d1C7lq26yGNujCa342oNf1uemxtjJErR_sgBQwqNUMo'
+        shell: python {0}
+        run: |
+          import json, os, sys
+
+          sa_raw = os.environ.get('GCP_SA_KEY', '').strip()
+          if not sa_raw:
+              print('::warning::GCP_SA_KEY no configurado todavía — se omite la sync.')
+              sys.exit(0)
+
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+
+          creds = service_account.Credentials.from_service_account_info(
+              json.loads(sa_raw),
+              scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
+          svc = build('sheets', 'v4', credentials=creds)
+          sheet_id = os.environ['SHEET_ID']
+
+          # Lee el nombre real de la primera pestaña (no asumir "Hoja 1").
+          meta = svc.spreadsheets().get(spreadsheetId=sheet_id).execute()
+          tab = meta['sheets'][0]['properties']['title']
+          res = svc.spreadsheets().values().get(
+              spreadsheetId=sheet_id, range=f"'{tab}'!A:R").execute()
+          rows = res.get('values', [])
+          if not rows:
+              print('::error::El Sheet está vacío.')
+              sys.exit(1)
+
+          header = [h.strip() for h in rows[0]]
+          idx = {name: i for i, name in enumerate(header)}
+
+          def cell(r, name):
+              i = idx.get(name)
+              return (r[i].strip() if i is not None and i < len(r) and r[i] is not None else '')
+
+          features, skipped = [], 0
+          for r in rows[1:]:
+              if not any(c.strip() for c in r):
+                  continue  # fila vacía
+              lat_s, lng_s = cell(r, 'Latitud'), cell(r, 'Longitud')
+              try:
+                  lat, lng = float(lat_s.replace(',', '.')), float(lng_s.replace(',', '.'))
+              except ValueError:
+                  skipped += 1
+                  print(f"::warning::Fila sin coords válidas: {cell(r, 'Nombre')!r}")
+                  continue
+              if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                  skipped += 1
+                  continue
+              split = lambda s: [x.strip() for x in s.split(';') if x.strip()]
+              props = {
+                  'id': cell(r, 'ID'),
+                  'name': cell(r, 'Nombre'),
+                  'sector': cell(r, 'Sector'),
+                  'typology': cell(r, 'Tipología'),
+                  'protagonist': cell(r, 'Protagonista'),
+                  'url': cell(r, 'Web'),
+                  'instagram': cell(r, 'Instagram'),
+                  'facebook': cell(r, 'Facebook'),
+                  'twitter': cell(r, 'Twitter'),
+                  'address': cell(r, 'Dirección'),
+                  'municipality': cell(r, 'Municipio'),
+                  'province': cell(r, 'Provincia'),
+                  'phones': split(cell(r, 'Teléfonos')),
+                  'emails': split(cell(r, 'Emails')),
+                  'island': cell(r, 'Isla'),
+                  'logo': cell(r, 'Logo ID'),
+              }
+              features.append({
+                  'type': 'Feature',
+                  'geometry': {'type': 'Point', 'coordinates': [lng, lat]},
+                  'properties': props,
+              })
+
+          if not features:
+              print('::error::Ninguna fila con coordenadas válidas — no se sobrescribe el geojson.')
+              sys.exit(1)
+
+          fc = {'type': 'FeatureCollection', 'features': features}
+          with open('entities.geojson', 'w', encoding='utf-8') as fh:
+              json.dump(fc, fh, ensure_ascii=False, separators=(', ', ': '))
+          print(f'{len(features)} entidades escritas, {skipped} descartadas por coords.')
+
+      - name: Commitear si hay cambios
+        run: |
+          if git diff --quiet entities.geojson; then
+            echo "Sin cambios en entities.geojson."
+          else
+            git config user.name "Diego Alegil"
+            git config user.email "diegoalegil@users.noreply.github.com"
+            git add entities.geojson
+            git commit -m "Sync: actualizar entities.geojson desde el Sheet ($(date -u +%Y-%m-%dT%H:%MZ))"
+            git push
+            echo "entities.geojson actualizado y commiteado."
+          fi
