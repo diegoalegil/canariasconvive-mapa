@@ -6,3 +6,6 @@ node_modules/
 .env
 .env.local
 scripts/
+
+# Semilla de importación al Sheet (el Sheet es ahora la fuente de verdad)
+canarias-convive-sheet.csv
