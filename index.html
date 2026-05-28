@@ -35,14 +35,7 @@
         <button type="button" id="btn-3d" aria-pressed="false">3D</button>
         <button type="button" id="btn-fit">Centrar</button>
       </div>
-      <details class="sector-filter" open>
-        <summary>Filtrar por isla</summary>
-        <div class="sector-pills" id="island-list" role="group" aria-label="Filtrar por isla"></div>
-      </details>
-      <details class="sector-filter" open>
-        <summary>Filtrar por sector</summary>
-        <div class="sector-pills" id="sector-list" role="group" aria-label="Filtrar por sector"></div>
-      </details>
+      <div id="filter-sections"></div>
       <div class="results-header" aria-live="polite">
         <span><strong id="results-count">—</strong> entidades</span>
         <button type="button" id="btn-clear-filters" class="btn-clear" hidden>Limpiar filtros</button>
@@ -185,12 +178,69 @@ function buildingFeature(f) {
 
 let GEOJSON = null;
 let map = null;
-let activeFilters = new Set();
-let activeIslands = new Set();
 let searchQuery = '';
 let currentMode = '2d';
 let zonesData = null;
 const seenMapErrors = new Set();
+
+// === FILTROS DINÁMICOS ===
+// Los filtros se generan a partir de las columnas del Sheet (props._filters).
+// activeFilters: { nombreDimensión: Set(valoresSeleccionados) }.
+// filterDims: [ { name, values:[...] } ] — dimensiones mostrables, orden estable.
+let activeFilters = {};
+let filterDims = [];
+
+// Columnas que NUNCA son filtro (identidad, texto libre, contacto, coords).
+const FILTER_BLOCKLIST = new Set([
+  'ID', 'Nombre', 'Dirección', 'Latitud', 'Longitud',
+  'Teléfonos', 'Emails', 'Web', 'Facebook', 'Instagram', 'Twitter', 'Logo ID'
+]);
+// Si una columna tiene más de N valores distintos es texto libre → no es filtro.
+const FILTER_MAX_CARDINALITY = 40;
+// Dimensión que, al filtrarse, dispara vuelo de cámara en el mapa.
+const FLYTO_DIM = 'Isla';
+// Orden preferente de las secciones de filtro (el resto va alfabético detrás).
+const FILTER_DIM_ORDER = ['Isla', 'Sector', 'Tipología', 'Protagonista', 'Municipio', 'Provincia'];
+
+// Devuelve el dict de dimensiones de filtro de una feature. Usa props._filters
+// (que emite la Action con TODAS las columnas no bloqueadas). Si un geojson
+// antiguo no lo trae, lo deriva de las columnas conocidas (degradación elegante).
+function featureFilters(f) {
+  const p = f.properties;
+  if (p._filters && typeof p._filters === 'object') return p._filters;
+  const out = {};
+  if (p.sector) out['Sector'] = p.sector;
+  if (p.typology) out['Tipología'] = p.typology;
+  if (p.protagonist) out['Protagonista'] = p.protagonist;
+  if (p.island) out['Isla'] = p.island;
+  if (p.municipality) out['Municipio'] = p.municipality;
+  if (p.province) out['Provincia'] = p.province;
+  return out;
+}
+
+// Calcula qué dimensiones son filtrables: descarta lista negra, columnas con
+// un solo valor (no aportan) y las de demasiada cardinalidad (texto libre).
+function computeFilterDims() {
+  const byDim = {};
+  GEOJSON.features.forEach(f => {
+    const ff = featureFilters(f);
+    for (const dim in ff) {
+      if (FILTER_BLOCKLIST.has(dim)) continue;
+      const val = ff[dim];
+      if (val === undefined || val === null || val === '') continue;
+      (byDim[dim] = byDim[dim] || new Set()).add(String(val));
+    }
+  });
+  filterDims = Object.keys(byDim)
+    .filter(dim => byDim[dim].size >= 2 && byDim[dim].size <= FILTER_MAX_CARDINALITY)
+    .map(dim => ({ name: dim, values: [...byDim[dim]].sort((a, b) => a.localeCompare(b, 'es')) }));
+  filterDims.sort((a, b) => {
+    const ia = FILTER_DIM_ORDER.indexOf(a.name), ib = FILTER_DIM_ORDER.indexOf(b.name);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.name.localeCompare(b.name, 'es');
+  });
+  // Inicializa un Set por dimensión.
+  filterDims.forEach(d => { if (!activeFilters[d.name]) activeFilters[d.name] = new Set(); });
+}
 
 // Id de la entidad actualmente seleccionada (panel de detalle abierto).
 // Se usa para sincronizar el halo en el mapa y la clase .selected en la card.
@@ -321,54 +371,49 @@ function openEntityFromUrl() {
 }
 
 function initSidebar() {
-  const sectorCounts = {};
-  const islandCounts = {};
-  GEOJSON.features.forEach(f => {
-    sectorCounts[f.properties.sector] = (sectorCounts[f.properties.sector] || 0) + 1;
-    const isl = f.properties.island;
-    if (isl) islandCounts[isl] = (islandCounts[isl] || 0) + 1;
-  });
+  computeFilterDims();
 
-  const islandList = document.getElementById('island-list');
-  Object.entries(islandCounts).sort((a, b) => b[1] - a[1]).forEach(([island, n]) => {
-    const pill = document.createElement('button');
-    pill.type = 'button';
-    pill.className = 'sector-pill';
-    pill.setAttribute('aria-pressed', 'false');
-    pill.style.setProperty('--c', '#0D4E47');
-    pill.innerHTML = `<span>${escapeHTML(island)}</span><span class="count">${n}</span>`;
-    pill.dataset.island = island;
-    pill.addEventListener('click', () => {
-      const selected = !activeIslands.has(island);
-      if (selected) activeIslands.add(island); else activeIslands.delete(island);
-      pill.classList.toggle('selected', selected);
-      pill.setAttribute('aria-pressed', String(selected));
-      applyFilter();
-      syncFilterStateToUrl();
-      flyToIslands(activeIslands);
-    });
-    islandList.appendChild(pill);
-  });
+  // Construye una sección <details> por dimensión de filtro detectada.
+  const container = document.getElementById('filter-sections');
+  container.innerHTML = '';
+  filterDims.forEach((dim, di) => {
+    const det = document.createElement('details');
+    det.className = 'sector-filter';
+    if (di < 2) det.open = true;  // las dos primeras abiertas por defecto
+    const summary = document.createElement('summary');
+    summary.textContent = 'Filtrar por ' + dim.name.toLowerCase();
+    det.appendChild(summary);
+    const wrap = document.createElement('div');
+    wrap.className = 'sector-pills';
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'Filtrar por ' + dim.name);
 
-  const list = document.getElementById('sector-list');
-  list.innerHTML = '';
-  Object.entries(sectorCounts).sort((a, b) => b[1] - a[1]).forEach(([sector, n]) => {
-    const pill = document.createElement('button');
-    pill.type = 'button';
-    pill.className = 'sector-pill';
-    pill.setAttribute('aria-pressed', 'false');
-    pill.style.setProperty('--c', SECTOR_COLORS[sector] || '#999');
-    pill.innerHTML = `<span class="dot"></span><span>${escapeHTML(sector)}</span><span class="count">${n}</span>`;
-    pill.dataset.sector = sector;
-    pill.addEventListener('click', () => {
-      const selected = !activeFilters.has(sector);
-      if (selected) activeFilters.add(sector); else activeFilters.delete(sector);
-      pill.classList.toggle('selected', selected);
-      pill.setAttribute('aria-pressed', String(selected));
-      applyFilter();
-      syncFilterStateToUrl();
+    dim.values.forEach(val => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'sector-pill';
+      pill.setAttribute('aria-pressed', 'false');
+      // El Sector colorea su pill con la paleta; el resto usa el verde corporativo.
+      const isSector = dim.name === 'Sector';
+      pill.style.setProperty('--c', isSector ? (SECTOR_COLORS[val] || '#6E6E6E') : '#0D4E47');
+      const dot = isSector ? '<span class="dot"></span>' : '';
+      pill.innerHTML = `${dot}<span>${escapeHTML(val)}</span><span class="count"></span>`;
+      pill.dataset.dim = dim.name;
+      pill.dataset.value = val;
+      pill.addEventListener('click', () => {
+        const set = activeFilters[dim.name];
+        const selected = !set.has(val);
+        if (selected) set.add(val); else set.delete(val);
+        pill.classList.toggle('selected', selected);
+        pill.setAttribute('aria-pressed', String(selected));
+        applyFilter();
+        syncFilterStateToUrl();
+        if (dim.name === FLYTO_DIM) flyToIslands(activeFilters[FLYTO_DIM]);
+      });
+      wrap.appendChild(pill);
     });
-    list.appendChild(pill);
+    det.appendChild(wrap);
+    container.appendChild(det);
   });
 
   document.getElementById('search').addEventListener('input', (e) => {
@@ -400,25 +445,19 @@ function initSidebar() {
   const btnClear = document.getElementById('btn-clear-filters');
   if (btnClear) btnClear.addEventListener('click', clearAllFilters);
 
-  // Restaura el estado de filtros desde la URL: marca las pills correspondientes,
-  // rellena el input de búsqueda y actualiza los sets internos. Se llama al final
-  // de initSidebar para que ya existan las pills en el DOM.
+  // Restaura el estado de filtros desde la URL: marca pills, rellena búsqueda,
+  // y vuelca en los Sets internos. Sólo acepta dim/valores que existan.
   const initial = getFilterStateFromUrl();
-  initial.islands.forEach(i => {
-    if (islandCounts[i]) activeIslands.add(i);
-  });
-  initial.sectors.forEach(s => {
-    if (sectorCounts[s]) activeFilters.add(s);
-  });
+  for (const dim in initial.dims) {
+    const set = activeFilters[dim];
+    if (!set) continue;
+    const known = (filterDims.find(d => d.name === dim) || {}).values || [];
+    initial.dims[dim].forEach(v => { if (known.includes(v)) set.add(v); });
+  }
   searchQuery = normalize(initial.q);
-  document.querySelectorAll('.sector-pill[data-island]').forEach(p => {
-    if (activeIslands.has(p.dataset.island)) {
-      p.classList.add('selected');
-      p.setAttribute('aria-pressed', 'true');
-    }
-  });
-  document.querySelectorAll('.sector-pill[data-sector]').forEach(p => {
-    if (activeFilters.has(p.dataset.sector)) {
+  document.querySelectorAll('.sector-pill[data-dim]').forEach(p => {
+    const set = activeFilters[p.dataset.dim];
+    if (set && set.has(p.dataset.value)) {
       p.classList.add('selected');
       p.setAttribute('aria-pressed', 'true');
     }
@@ -432,38 +471,43 @@ function initSidebar() {
 // Estado compartido en URL — permite copiar/pegar la dirección y reproducir
 // exactamente la vista filtrada que tenía un usuario. Los Sets se serializan
 // con coma como separador (los valores no contienen comas en este dataset).
+// Estado de filtros en URL. Cada dimensión se serializa con su propio nombre
+// como clave (?Sector=...&Isla=...&q=...). 'q' y 'entity' se reservan.
 function getFilterStateFromUrl() {
   const p = new URLSearchParams(window.location.search);
   const split = s => s ? s.split(',').map(x => x.trim()).filter(Boolean) : [];
-  return {
-    islands: split(p.get('island')),
-    sectors: split(p.get('sector')),
-    q: p.get('q') || ''
-  };
+  const dims = {};
+  for (const [key, value] of p.entries()) {
+    if (key === 'q' || key === 'entity') continue;
+    dims[key] = split(value);
+  }
+  return { dims, q: p.get('q') || '' };
 }
 
 function syncFilterStateToUrl() {
   const url = new URL(window.location.href);
-  const setOrDelete = (key, value) => {
-    if (value && value.length) url.searchParams.set(key, value);
-    else url.searchParams.delete(key);
-  };
-  setOrDelete('island', [...activeIslands].join(','));
-  setOrDelete('sector', [...activeFilters].join(','));
-  setOrDelete('q', searchQuery);
+  // Limpia params de dimensiones previos (todo lo que no sea q/entity).
+  [...url.searchParams.keys()].forEach(k => {
+    if (k !== 'q' && k !== 'entity') url.searchParams.delete(k);
+  });
+  for (const dim in activeFilters) {
+    const vals = [...activeFilters[dim]];
+    if (vals.length) url.searchParams.set(dim, vals.join(','));
+  }
+  if (searchQuery) url.searchParams.set('q', searchQuery);
+  else url.searchParams.delete('q');
   // replaceState (no pushState) para no llenar el historial con cada tecla.
   history.replaceState(null, '', url.toString());
 }
 
 function hasActiveFilters() {
-  return activeIslands.size > 0 || activeFilters.size > 0 || searchQuery.length > 0;
+  if (searchQuery.length > 0) return true;
+  return Object.values(activeFilters).some(set => set.size > 0);
 }
 
 function clearAllFilters() {
-  activeIslands.clear();
-  activeFilters.clear();
+  for (const dim in activeFilters) activeFilters[dim].clear();
   searchQuery = '';
-  // UI: deseleccionar todas las pills marcadas y vaciar el input de búsqueda.
   document.querySelectorAll('.sector-pill.selected').forEach(p => {
     p.classList.remove('selected');
     p.setAttribute('aria-pressed', 'false');
@@ -486,47 +530,45 @@ function matchesSearch(props) {
   return fields.some(f => f.includes(searchQuery));
 }
 
-function getFilteredFeatures() {
-  return GEOJSON.features.filter(f =>
-    (activeFilters.size === 0 || activeFilters.has(f.properties.sector)) &&
-    (activeIslands.size === 0 || activeIslands.has(f.properties.island)) &&
-    matchesSearch(f.properties)
-  );
+// Una feature pasa si, para cada dimensión con selección activa, su valor en
+// esa dimensión está seleccionado. AND entre dimensiones, OR dentro de cada una.
+function passesFilters(f, ignoreDim) {
+  const ff = featureFilters(f);
+  for (const dim in activeFilters) {
+    if (dim === ignoreDim) continue;
+    const set = activeFilters[dim];
+    if (set.size === 0) continue;
+    if (!set.has(String(ff[dim] == null ? '' : ff[dim]))) return false;
+  }
+  return true;
 }
 
-// Recalcula los conteos de cada pill (isla / sector) excluyendo el filtro de
-// la misma dimensión: si filtras por "Tenerife", las pills de sector muestran
-// cuántas entidades hay EN Tenerife por sector; viceversa para sector. Así la
-// leyenda funciona como guía contextual del subset visible.
+function getFilteredFeatures() {
+  return GEOJSON.features.filter(f => passesFilters(f, null) && matchesSearch(f.properties));
+}
+
+// Recalcula los conteos de cada pill excluyendo el filtro de su propia
+// dimensión: si filtras por "Tenerife", las pills de sector muestran cuántas
+// entidades hay EN Tenerife por sector. La leyenda guía el subset visible.
 function updateFacetedCounts() {
   if (!GEOJSON) return;
-  const matches = (f, ignoreKey) => {
-    if (ignoreKey !== 'sector' && activeFilters.size > 0 && !activeFilters.has(f.properties.sector)) return false;
-    if (ignoreKey !== 'island' && activeIslands.size > 0 && !activeIslands.has(f.properties.island)) return false;
-    if (!matchesSearch(f.properties)) return false;
-    return true;
-  };
-  const sectorCounts = {};
-  const islandCounts = {};
+  const counts = {};
+  filterDims.forEach(d => { counts[d.name] = {}; });
   GEOJSON.features.forEach(f => {
-    if (matches(f, 'sector')) {
-      sectorCounts[f.properties.sector] = (sectorCounts[f.properties.sector] || 0) + 1;
-    }
-    if (matches(f, 'island')) {
-      const isl = f.properties.island;
-      if (isl) islandCounts[isl] = (islandCounts[isl] || 0) + 1;
-    }
-  });
-  const updatePill = (selector, counts, key) => {
-    document.querySelectorAll(selector).forEach(p => {
-      const n = counts[p.dataset[key]] || 0;
-      const countEl = p.querySelector('.count');
-      if (countEl) countEl.textContent = n;
-      p.classList.toggle('empty', n === 0);
+    if (!matchesSearch(f.properties)) return;
+    const ff = featureFilters(f);
+    filterDims.forEach(d => {
+      if (!passesFilters(f, d.name)) return;
+      const v = String(ff[d.name] == null ? '' : ff[d.name]);
+      if (v) counts[d.name][v] = (counts[d.name][v] || 0) + 1;
     });
-  };
-  updatePill('.sector-pill[data-sector]', sectorCounts, 'sector');
-  updatePill('.sector-pill[data-island]', islandCounts, 'island');
+  });
+  document.querySelectorAll('.sector-pill[data-dim]').forEach(p => {
+    const n = (counts[p.dataset.dim] || {})[p.dataset.value] || 0;
+    const countEl = p.querySelector('.count');
+    if (countEl) countEl.textContent = n;
+    p.classList.toggle('empty', n === 0);
+  });
 }
 
 function applyFilter() {
@@ -998,7 +1040,7 @@ function initMap() {
 
     applyFilter();
     // Si la URL trajo islas filtradas, vuela a ellas al cargar el mapa.
-    if (activeIslands.size > 0) flyToIslands(activeIslands);
+    if (activeFilters[FLYTO_DIM] && activeFilters[FLYTO_DIM].size > 0) flyToIslands(activeFilters[FLYTO_DIM]);
   });
 }
 

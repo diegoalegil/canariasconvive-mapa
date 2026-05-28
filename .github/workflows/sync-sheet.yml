@@ -98,6 +98,14 @@ jobs:
               v = float(digits[:2] + '.' + digits[2:]) if len(digits) > 2 else float(digits)
               return -v if neg else v
 
+          # Columnas que NUNCA son filtro (identidad, texto libre, contacto, coords).
+          # Todo lo demás (incluidas columnas que se añadan en el futuro) se vuelca
+          # en props._filters y el mapa genera un filtro por cada una automáticamente.
+          FILTER_BLOCKLIST = {
+              'ID', 'Nombre', 'Dirección', 'Latitud', 'Longitud',
+              'Teléfonos', 'Emails', 'Web', 'Facebook', 'Instagram', 'Twitter', 'Logo ID',
+          }
+
           features, skipped = [], 0
           for r in rows[1:]:
               if not any(c.strip() for c in r):
@@ -125,6 +133,17 @@ jobs:
                   'island': cell(r, 'Isla'),
                   'logo': cell(r, 'Logo ID'),
               }
+              # Dimensiones de filtro: cada columna no bloqueada, con su nombre
+              # humano tal cual en el Sheet. El mapa decide cuáles mostrar según
+              # cardinalidad. Añadir una columna en el Sheet → nuevo filtro, sin tocar código.
+              filters = {}
+              for col in header:
+                  if col in FILTER_BLOCKLIST:
+                      continue
+                  v = cell(r, col)
+                  if v:
+                      filters[col] = v
+              props['_filters'] = filters
               features.append({
                   'type': 'Feature',
                   'geometry': {'type': 'Point', 'coordinates': [lng, lat]},
