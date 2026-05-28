@@ -55,8 +55,10 @@ jobs:
           # Lee el nombre real de la primera pestaña (no asumir "Hoja 1").
           meta = svc.spreadsheets().get(spreadsheetId=sheet_id).execute()
           tab = meta['sheets'][0]['properties']['title']
+          # Rango = pestaña entera (todas las columnas). NO acotar a A:R, porque
+          # columnas nuevas como "Entidades RECEX" (col 19+) quedarían fuera.
           res = svc.spreadsheets().values().get(
-              spreadsheetId=sheet_id, range=f"'{tab}'!A:R").execute()
+              spreadsheetId=sheet_id, range=f"'{tab}'").execute()
           rows = res.get('values', [])
           if not rows:
               print('::error::El Sheet está vacío.')
