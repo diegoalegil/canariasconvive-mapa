@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Guía del sistema de Mapas · Canarias Convive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0D4E47; --teal-2:#13635a; --ink:#283230; --muted:#5F6B68;
+    --line:#E6E9E8; --soft:#F5F7F6; --tint:#E8F3F1; --warn:#9a5b00; --warn-bg:#fff6e6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:'Montserrat',system-ui,sans-serif;color:var(--ink);background:#fff;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:0 22px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* Hero */
+  .hero{background:linear-gradient(160deg,var(--teal),var(--teal-2));color:#fff;padding:46px 0 30px}
+  .hero .eyebrow{font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;opacity:.8}
+  .hero h1{font-size:30px;font-weight:800;letter-spacing:-.5px;margin:8px 0 10px}
+  .hero .lead{font-size:15px;opacity:.95;max-width:640px}
+  .hero .lead strong{font-weight:700}
+  .searchbox{position:relative;margin-top:22px}
+  .search{
+    width:100%;padding:14px 16px 14px 44px;border:none;border-radius:10px;
+    font-family:inherit;font-size:15px;color:var(--ink);
+    background:#fff url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230D4E47' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='M11 11l3.5 3.5'/%3E%3C/svg%3E") no-repeat 16px center;
+    background-size:17px;box-shadow:0 6px 20px rgba(0,0,0,.15)
+  }
+  .search:focus{outline:none;box-shadow:0 0 0 3px rgba(255,255,255,.5),0 6px 20px rgba(0,0,0,.15)}
+  .noresults{margin-top:14px;font-size:14px;color:var(--muted);background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+
+  /* Quick nav */
+  nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:26px 0 6px}
+  nav.toc a{font-size:12.5px;font-weight:600;color:var(--teal);background:var(--tint);border:1px solid #d3e7e3;padding:6px 11px;border-radius:100px}
+  nav.toc a:hover{background:var(--teal);color:#fff;text-decoration:none}
+
+  main{padding:10px 0 40px}
+
+  details.card{
+    border:1px solid var(--line);border-radius:12px;margin:14px 0;overflow:hidden;background:#fff;
+    transition:box-shadow .15s,border-color .15s
+  }
+  details.card[open]{box-shadow:0 3px 16px rgba(13,78,71,.07);border-color:#d7dddb}
+  details.card summary{
+    cursor:pointer;list-style:none;padding:16px 20px;font-size:16.5px;font-weight:700;color:var(--teal);
+    display:flex;align-items:center;gap:11px;user-select:none
+  }
+  details.card summary::-webkit-details-marker{display:none}
+  details.card summary .ico{font-size:19px;line-height:1}
+  details.card summary::after{content:'＋';margin-left:auto;color:#9bb3ae;font-weight:700;font-size:17px}
+  details.card[open] summary::after{content:'－'}
+  details.card .body{padding:2px 20px 20px;color:var(--ink)}
+  details.card .body p{margin:10px 0}
+  details.card .body ul,details.card .body ol{margin:10px 0 10px 4px;padding-left:20px}
+  details.card .body li{margin:6px 0}
+  details.card .body h3{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--teal-2)}
+
+  .lead-in{color:var(--muted);font-size:14.5px;margin:4px 0 0}
+
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;background:var(--soft);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#0a3b35}
+
+  /* Flow diagram */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:14px 0}
+  .flow .step{flex:1;min-width:120px;background:var(--tint);border:1px solid #d3e7e3;border-radius:10px;padding:11px 12px;font-size:12.5px;font-weight:600;color:var(--teal-2);text-align:center;display:flex;align-items:center;justify-content:center}
+  .flow .arrow{align-self:center;color:#9bb3ae;font-weight:800;font-size:18px}
+
+  /* Definition rows */
+  .where{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:12px 0}
+  .where .row{display:grid;grid-template-columns:160px 1fr;gap:0;border-top:1px solid var(--line)}
+  .where .row:first-child{border-top:none}
+  .where .k{background:var(--soft);padding:11px 14px;font-weight:700;font-size:13px;color:var(--teal-2)}
+  .where .v{padding:11px 14px;font-size:14px}
+
+  .callout{border-radius:10px;padding:13px 15px;margin:14px 0;font-size:14px}
+  .callout.tip{background:var(--tint);border:1px solid #cfe5e1}
+  .callout.warn{background:var(--warn-bg);border:1px solid #f0d8a8;color:#5b4100}
+  .callout b{font-weight:700}
+
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:100px;vertical-align:middle}
+  .pill.live{background:#e3f3e8;color:#1c6b35;border:1px solid #bfe4ca}
+  .pill.wip{background:#fff1d6;color:#7a5200;border:1px solid #f0d8a8}
+
+  footer.foot{background:var(--soft);border-top:1px solid var(--line);padding:26px 0;margin-top:10px}
+  footer.foot p{font-size:14.5px;color:var(--muted)}
+  footer.foot .muted{font-size:12px;margin-top:8px;opacity:.8}
+
+  .hidden{display:none !important}
+  mark{background:#ffe9a8;color:inherit;border-radius:3px;padding:0 1px}
+  @media (max-width:560px){
+    .hero h1{font-size:24px}
+    .where .row{grid-template-columns:1fr}
+    .where .k{border-bottom:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Canarias Convive · Proyectos Comunitarios</p>
+    <h1>Guía del sistema de Mapas</h1>
+    <p class="lead">Cómo funcionan los mapas web que se actualizan solos desde una hoja de cálculo. Sirve para <strong>todos los mapas de la carpeta «Mapas»</strong> del Drive — Canarias Convive, Fuerteventura Protagonista y los que se añadan después.</p>
+    <div class="searchbox">
+      <input id="q" class="search" type="search" placeholder="Buscar en la guía…  (p. ej. «dar de alta», «filtros», «no sale en el mapa»)" autocomplete="off" spellcheck="false">
+    </div>
+    <p id="noresults" class="noresults hidden">Sin resultados para «<span></span>». Prueba con otra palabra.</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc" id="toc">
+    <a href="#que-es">Qué es</a>
+    <a href="#donde">Dónde vive cada cosa</a>
+    <a href="#flujo">Cómo funciona</a>
+    <a href="#alta">Dar de alta</a>
+    <a href="#editar">Editar / quitar</a>
+    <a href="#filtros">Filtros</a>
+    <a href="#nuevo-mapa">Mapa nuevo</a>
+    <a href="#tecnico">Para técnicos</a>
+    <a href="#problemas">Si algo falla</a>
+  </nav>
+</div>
+
+<main class="wrap">
+
+  <details class="card" id="que-es" open>
+    <summary><span class="ico">📍</span> ¿Qué es este sistema?</summary>
+    <div class="body">
+      <p>Es una forma sencilla de tener <b>mapas web</b> que se mantienen al día <b>solos</b>, sin tocar código: una persona edita una <b>hoja de cálculo</b> (Google Sheets) y, poco después, el mapa de internet refleja los cambios.</p>
+      <p>La idea: en el Drive hay una carpeta <b>«Mapas»</b> y, dentro, <b>una hoja por proyecto</b>. Cada hoja es la <b>fuente de verdad</b> (la lista oficial de entidades, con su ubicación, sector, contacto, etc.). Un proceso automático lee esa hoja cada hora y regenera el mapa.</p>
+      <h3>Mapas que hay ahora mismo</h3>
+      <ul>
+        <li><b>Canarias Convive</b> <span class="pill live">en vivo</span> — <a href="https://diegoalegil.github.io/canariasconvive-mapa/" target="_blank" rel="noopener">ver mapa</a></li>
+        <li><b>Fuerteventura Protagonista</b> <span class="pill wip">en construcción</span> — <a href="https://diegoalegil.github.io/fuerteventuraprotagonista-mapa/" target="_blank" rel="noopener">ver mapa</a></li>
+      </ul>
+      <p class="lead-in">Todos siguen exactamente el mismo patrón, así que lo que aprendas aquí vale para cualquiera de ellos.</p>
+    </div>
+  </details>
+
+  <details class="card" id="donde">
+    <summary><span class="ico">🗂️</span> Dónde vive cada cosa</summary>
+    <div class="body">
+      <p>El sistema tiene varias piezas. Para no perderte, esto es qué es cada una y para qué sirve:</p>
+      <div class="where">
+        <div class="row"><div class="k">Carpeta «Mapas»</div><div class="v">En el Drive compartido. Contiene una hoja por proyecto. Es el punto de partida de todo.</div></div>
+        <div class="row"><div class="k">Hoja oficial</div><div class="v">La lista de verdad de cada mapa (una por proyecto). Lo que está aquí es lo que sale en el mapa. <b>Se edita a mano.</b></div></div>
+        <div class="row"><div class="k">Formulario</div><div class="v">Un Google Forms público donde las entidades piden aparecer en el mapa. Sus respuestas caen en la hoja de peticiones.</div></div>
+        <div class="row"><div class="k">Hoja de peticiones</div><div class="v">Donde llegan las respuestas del formulario para <b>revisarlas</b> antes de publicarlas (la «sala de espera»).</div></div>
+        <div class="row"><div class="k">El mapa web</div><div class="v">La página pública que ve todo el mundo. Carga los datos ya procesados; no se toca a mano.</div></div>
+        <div class="row"><div class="k">El «motor»</div><div class="v">Un proceso automático (en GitHub) que cada hora lee la hoja oficial y actualiza el mapa.</div></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="card" id="flujo">
+    <summary><span class="ico">🔄</span> Cómo funciona por dentro (el camino del dato)</summary>
+    <div class="body">
+      <p>Hay dos caminos. Conviene tenerlos claros porque explican por qué algo aparece (o no) en el mapa.</p>
+      <h3>1) De una petición a la lista oficial</h3>
+      <div class="flow">
+        <div class="step">Formulario</div><div class="arrow">→</div>
+        <div class="step">Hoja de peticiones</div><div class="arrow">→</div>
+        <div class="step">Se revisa y aprueba</div><div class="arrow">→</div>
+        <div class="step">Hoja oficial</div>
+      </div>
+      <p class="lead-in">Una entidad rellena el formulario; su respuesta queda «en espera»; una persona la revisa (le pone Sector/Tipología/Protagonista y la marca como aprobada) y, al pulsar un botón, pasa a la lista oficial ya con sus coordenadas.</p>
+      <h3>2) De la lista oficial al mapa</h3>
+      <div class="flow">
+        <div class="step">Hoja oficial</div><div class="arrow">→</div>
+        <div class="step">El motor (cada hora)</div><div class="arrow">→</div>
+        <div class="step">Archivo de datos</div><div class="arrow">→</div>
+        <div class="step">El mapa</div>
+      </div>
+      <p class="lead-in">Cada hora, el motor lee la hoja oficial, prepara un archivo de datos y el mapa lo muestra. Por eso un cambio en la hoja tarda <b>hasta una hora</b> en verse en el mapa.</p>
+      <div class="callout tip">💡 <b>Regla de oro:</b> si quieres que algo salga en el mapa, tiene que estar en la <b>hoja oficial</b> y tener <b>latitud y longitud</b> válidas.</div>
+    </div>
+  </details>
+
+  <details class="card" id="alta">
+    <summary><span class="ico">➕</span> Dar de alta una entidad nueva</summary>
+    <div class="body">
+      <p>Las altas nuevas entran por el <b>formulario</b> y se publican desde la <b>hoja de peticiones</b>. Pasos:</p>
+      <ol>
+        <li>La entidad rellena el <b>formulario</b> (o lo rellenas tú por ella). Su respuesta aparece en la hoja de peticiones.</li>
+        <li>En esa hoja, en la fila de la nueva entidad, rellena con los desplegables: <b>Sector</b>, <b>Tipología</b> y <b>Protagonista</b>.</li>
+        <li>Pon la columna <b>Estado</b> = <b>«Aprobado»</b>. (Las que no apruebes se quedan esperando, no pasa nada.)</li>
+        <li>Menú <b>«Canarias Convive» → «Promover aprobadas»</b>. El sistema busca la dirección, calcula sus coordenadas, le da un identificador y la copia a la hoja oficial.</li>
+        <li>En la siguiente actualización (hasta 1 hora) aparece en el mapa.</li>
+      </ol>
+      <div class="callout warn">⚠️ Si al promover dice <b>«0 movidas»</b>, casi siempre es porque a esa fila le falta poner <b>Estado = Aprobado</b>. No promueve nada que no esté aprobado.</div>
+      <div class="callout tip">💡 No hace falta poner la latitud/longitud a mano: el sistema las calcula desde la dirección. Solo si una dirección «no se encuentra», te avisa para que la pongas tú.</div>
+    </div>
+  </details>
+
+  <details class="card" id="editar">
+    <summary><span class="ico">✏️</span> Editar o quitar una entidad que ya está</summary>
+    <div class="body">
+      <p>Para una entidad que <b>ya existe</b> en el mapa, no toques el formulario: edita directamente la <b>hoja oficial</b>.</p>
+      <ul>
+        <li><b>Cambiar datos</b> (nombre, web, sector, dirección…): edita su fila en la hoja oficial. En la siguiente actualización se refleja.</li>
+        <li><b>Cambiar dónde aparece el punto:</b> corrige <b>Latitud</b> y <b>Longitud</b> en su fila.</li>
+        <li><b>Quitarla del mapa:</b> borra su fila de la hoja oficial.</li>
+      </ul>
+      <div class="callout tip">💡 Los menús (Sector, Tipología, Isla, Municipio…) son desplegables para que todo se escriba siempre igual. Procura elegir de la lista en vez de escribir a mano.</div>
+    </div>
+  </details>
+
+  <details class="card" id="filtros">
+    <summary><span class="ico">🎛️</span> Los filtros del mapa</summary>
+    <div class="body">
+      <p>Los filtros del mapa <b>se generan solos</b> a partir de las columnas de la hoja. Esto es lo potente del sistema:</p>
+      <ul>
+        <li>Cada columna «de categoría» (Sector, Tipología, Protagonista, Isla, Entidades RECEX…) se convierte automáticamente en un filtro.</li>
+        <li><b>¿Quieres un filtro nuevo?</b> Añade una columna a la hoja oficial, rellénala, y aparecerá como filtro tras la siguiente actualización. Sin tocar código.</li>
+        <li>Las columnas de identidad y contacto (Nombre, Dirección, Teléfonos, Emails, Web, redes, coordenadas…) <b>nunca</b> se usan como filtro.</li>
+      </ul>
+      <p class="lead-in">Para que una columna se muestre como filtro debe tener entre 2 y 40 valores distintos (si tiene demasiados, no tiene sentido como filtro).</p>
+    </div>
+  </details>
+
+  <details class="card" id="nuevo-mapa">
+    <summary><span class="ico">🗺️</span> Añadir un mapa nuevo a la carpeta «Mapas»</summary>
+    <div class="body">
+      <p>Como todos los mapas son iguales por dentro, montar uno nuevo es <b>replicar el patrón</b>:</p>
+      <ol>
+        <li>Crear una <b>hoja nueva</b> en la carpeta «Mapas» con las mismas columnas (la lista oficial del nuevo proyecto).</li>
+        <li>Duplicar el <b>mapa</b> (el repositorio de uno existente) y apuntarlo a la hoja nueva.</li>
+        <li>Activar el <b>motor</b> (la sincronización automática) para esa hoja.</li>
+        <li>Opcional: crear su <b>formulario</b> de altas y su <b>hoja de peticiones</b>, igual que en Canarias Convive.</li>
+      </ol>
+      <p class="lead-in">Es una tarea técnica puntual; está en la sección «Para técnicos». Una vez montado, el día a día (altas, ediciones, filtros) es idéntico a lo de arriba.</p>
+    </div>
+  </details>
+
+  <details class="card" id="tecnico">
+    <summary><span class="ico">🛠️</span> Para técnicos</summary>
+    <div class="body">
+      <p>Resumen de la maquinaria, por si hay que mantenerla o montar un mapa nuevo.</p>
+      <h3>Repositorios y hosting</h3>
+      <ul>
+        <li>Cada mapa es un repo de GitHub con un <code>index.html</code> (Mapbox GL JS) servido por GitHub Pages.</li>
+        <li>Canarias Convive: <a href="https://github.com/diegoalegil/canariasconvive-mapa" target="_blank" rel="noopener">github.com/diegoalegil/canariasconvive-mapa</a>.</li>
+        <li>Fuerteventura Protagonista: <a href="https://github.com/diegoalegil/fuerteventuraprotagonista-mapa" target="_blank" rel="noopener">github.com/diegoalegil/fuerteventuraprotagonista-mapa</a>.</li>
+      </ul>
+      <h3>Sincronización Sheet → mapa</h3>
+      <ul>
+        <li>Una <b>GitHub Action</b> (<code>.github/workflows/sync-sheet.yml</code>) se ejecuta cada hora (o a mano con «Run workflow»).</li>
+        <li>Lee la hoja con una <b>cuenta de servicio</b> de Google; su clave va como <i>secret</i> en GitHub (<code>GCP_SA_KEY</code>), nunca en el código.</li>
+        <li>Regenera <code>entities.geojson</code>; el mapa lo carga. Cada columna no bloqueada se vuelca como dimensión de filtro.</li>
+      </ul>
+      <h3>Scripts de la hoja (Apps Script)</h3>
+      <ul>
+        <li>Las hojas tienen un menú propio: <b>«Canarias Convive»</b>. En la oficial → «Formatear hoja»; en la de peticiones → «Preparar hoja» y «Promover aprobadas».</li>
+        <li>«Promover» geocodifica la dirección, genera un identificador y vuelca la fila al esquema de la hoja oficial.</li>
+        <li>Los desplegables se aplican hasta 10.000 filas, para que las altas futuras ya los tengan.</li>
+      </ul>
+      <h3>Detalles a tener en cuenta</h3>
+      <ul>
+        <li><b>Coordenadas:</b> el Sheet en idioma español puede «romper» el punto decimal; el motor lo reconstruye automáticamente al generar los datos.</li>
+        <li><b>Mapbox:</b> estilo corporativo propio y token de acceso restringido por dominio (no se sube al repo).</li>
+        <li><b>Isla múltiple:</b> el formulario permite marcar varias islas; al promover se usa la primera para la provincia.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="card" id="problemas">
+    <summary><span class="ico">🚑</span> Si algo no funciona</summary>
+    <div class="body">
+      <h3>Una entidad no aparece en el mapa</h3>
+      <p>Casi siempre es por las <b>coordenadas</b>: si una fila no tiene Latitud/Longitud válidas, el motor la salta. Revisa que estén rellenas y bien.</p>
+      <h3>Hice un cambio y no se ve</h3>
+      <p>La actualización es <b>cada hora</b>. Espera un rato o, si tienes acceso a GitHub, lanza la sincronización a mano con «Run workflow».</p>
+      <h3>Al promover dice «0 movidas»</h3>
+      <p>Falta poner <b>Estado = «Aprobado»</b> en esa fila. Solo promueve las aprobadas.</p>
+      <h3>Una dirección «no se pudo geocodificar»</h3>
+      <p>La dirección no es reconocible. Pon tú la <b>Latitud</b> y <b>Longitud</b> en su fila y vuelve a promover.</p>
+      <h3>Quiero un filtro nuevo y no aparece</h3>
+      <p>Comprueba que la columna tenga entre <b>2 y 40 valores distintos</b> y que no sea de identidad/contacto. Tras la siguiente sincronización aparecerá.</p>
+    </div>
+  </details>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p>Para cualquier cosa, escribe a Diego 😌 · <a href="mailto:diegogildam@gmail.com">diegogildam@gmail.com</a></p>
+    <p class="muted">Guía del sistema de Mapas · Canarias Convive — Proyectos Comunitarios.</p>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var q = document.getElementById('q');
+    var cards = Array.prototype.slice.call(document.querySelectorAll('details.card'));
+    var noresults = document.getElementById('noresults');
+    var nrSpan = noresults.querySelector('span');
+    var defaultOpen = cards.map(function(c){ return c.open; });
+
+    function reset(){
+      cards.forEach(function(c,i){ c.classList.remove('hidden'); c.open = defaultOpen[i]; });
+      noresults.classList.add('hidden');
+    }
+
+    q.addEventListener('input', function(){
+      var term = q.value.trim().toLowerCase();
+      if(!term){ reset(); return; }
+      var any = false;
+      cards.forEach(function(c){
+        var match = c.textContent.toLowerCase().indexOf(term) !== -1;
+        c.classList.toggle('hidden', !match);
+        c.open = match;
+        if(match) any = true;
+      });
+      noresults.classList.toggle('hidden', any);
+      nrSpan.textContent = q.value;
+    });
+
+    // Al pulsar un atajo de la barra, abre la sección destino.
+    document.getElementById('toc').addEventListener('click', function(e){
+      var a = e.target.closest('a'); if(!a) return;
+      var t = document.querySelector(a.getAttribute('href'));
+      if(t){ t.open = true; }
+    });
+  })();
+</script>
+</body>
+</html>
