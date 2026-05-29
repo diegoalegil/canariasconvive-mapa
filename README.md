@@ -87,7 +87,6 @@ El token de Mapbox del repo está restringido por URL; para servirlo desde otro 
 - [x] Estado seleccionado sincronizado entre marcador y card.
 - [x] GitHub Actions que refresca `entities.geojson` automáticamente.
 - [x] CI que audita los enlaces externos del geojson.
-- [ ] Cache local (Service Worker) para carga offline.
 - [ ] Búsqueda con puntuación ponderada (nombre por encima de tipología).
 
 ## Licencia
