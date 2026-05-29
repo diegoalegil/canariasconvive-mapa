@@ -33,6 +33,8 @@ Formulario de alta  →  Hoja oficial "Canarias Convive" (Google Sheets)
 
 La página `canariasconvive.com/mapa-interactivo/` (WordPress, plantilla en blanco) incrusta el visor **a pantalla completa** con un `<iframe>`. El botón *“Volver a Canarias Convive”* devuelve al sitio principal.
 
+![El mapa integrado en canariasconvive.com](captura-web.webp)
+
 ## Funcionalidades
 
 - **Estilo Mapbox propio** con la paleta corporativa (verde `#0D4E47`, coral `#F55654`, oliva `#979C30`, burdeos `#B15265`) y tipografía Montserrat.
