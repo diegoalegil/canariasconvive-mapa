@@ -87,7 +87,7 @@ El token de Mapbox del repo está restringido por URL; para servirlo desde otro 
 - [x] Estado seleccionado sincronizado entre marcador y card.
 - [x] GitHub Actions que refresca `entities.geojson` automáticamente.
 - [x] CI que audita los enlaces externos del geojson.
-- [ ] Búsqueda con puntuación ponderada (nombre por encima de tipología).
+- [x] Búsqueda con puntuación ponderada (las coincidencias en el nombre van primero).
 
 ## Licencia
 

@@ -927,6 +927,26 @@ function matchesSearch(props) {
   return fields.some(f => f.includes(searchQuery));
 }
 
+// Puntuación de relevancia para ORDENAR los resultados de búsqueda. NO cambia
+// qué entidades pasan el filtro (eso lo decide matchesSearch); solo influye en
+// el orden de la lista. Mayor puntuación = más arriba. Una coincidencia en el
+// nombre pesa mucho más que en otros campos (ubicación, sector, etc.).
+function searchScore(props) {
+  const q = searchQuery;
+  if (!q) return 0;
+  const name = normalize(props.name);
+  let score = 0;
+  if (name === q) score += 1000;              // nombre idéntico a la búsqueda
+  else if (name.startsWith(q)) score += 500;  // el nombre empieza por la búsqueda
+  else if (name.includes(q)) score += 200;    // la búsqueda aparece en el nombre
+  // Resto de campos: mucho menos peso (evita que una coincidencia en la
+  // dirección/municipio adelante a una coincidencia real en el nombre).
+  const otros = [props.municipality, props.province, props.address, props.sector, props.protagonist]
+    .map(normalize);
+  if (otros.some(f => f.includes(q))) score += 10;
+  return score;
+}
+
 // Una feature pasa si, para cada dimensión con selección activa, su valor en
 // esa dimensión está seleccionado. AND entre dimensiones, OR dentro de cada una.
 function passesFilters(f, ignoreDim) {
@@ -998,7 +1018,15 @@ function renderEntityList(features) {
     return;
   }
   const frag = document.createDocumentFragment();
-  const sorted = features.slice().sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'es'));
+  // Con búsqueda activa, ordena por relevancia (puntuación) y desempata por
+  // nombre. Sin búsqueda, mantiene el orden alfabético de siempre.
+  const sorted = features.slice().sort((a, b) => {
+    if (searchQuery) {
+      const d = searchScore(b.properties) - searchScore(a.properties);
+      if (d !== 0) return d;
+    }
+    return a.properties.name.localeCompare(b.properties.name, 'es');
+  });
   sorted.slice(0, 120).forEach(f => {
     const p = f.properties;
     const color = SECTOR_COLORS[p.sector] || '#999';
