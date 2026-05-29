@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Canarias Convive — Mapa de agentes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.css" rel="stylesheet"
+      integrity="sha384-EP/H7vnAWQ5LW9GnEKFrWdLNFs5Ar50IJgtlPCBzA/mZRKZrR+/rMG5kXl5QNyCp"
+      crossorigin="anonymous" />
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.js"
+        integrity="sha384-5kuWTSgWp7o0q4Mw8nndFaZqiHFMR1ypa8Xlv3Ef0eXMKYdWPwa5+335eGOMhx+r"
+        crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@turf/turf@7.3.5/turf.min.js"
+        integrity="sha384-BQF91ViEyKh73QVOKMd0MfkJ7bWbu+o0g448Qfb7aP3HVPItiy/4UZ7OuTCUDKNi"
+        crossorigin="anonymous"></script>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* Canarias Convive — estilos del mapa de agentes.
+   Extraído del monolito index.html para reducir su tamaño y permitir
+   cacheado independiente. Cargado via <link> desde index.html. */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'Montserrat', sans-serif; color: #323232; -webkit-font-smoothing: antialiased; }
+#container { display: flex; height: 100vh; height: 100dvh; }
+#sidebar {
+  width: 380px;
+  background: #FFFFFF;
+  border-right: 1px solid #E8E8E8;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#map { flex: 1; position: relative; }
+
+.sidebar-header { padding: 22px 24px 14px; }
+.sidebar-header h1 {
+  font-size: 18px; font-weight: 700; color: #0D4E47;
+  letter-spacing: -0.3px;
+}
+.sidebar-header p { font-size: 12px; color: #5F6B68; margin-top: 2px; }
+
+.sidebar-search {
+  padding: 4px 24px 16px;
+  background: #FFF;
+  border-bottom: 1px solid #F0F0F0;
+}
+.search-input {
+  width: 100%; padding: 11px 14px 11px 38px;
+  border: 1px solid #E0E0E0; border-radius: 8px;
+  font-family: inherit; font-size: 13px;
+  background: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23999' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='M11 11l3 3'/%3E%3C/svg%3E") no-repeat 12px center;
+  background-size: 16px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search-input:focus { outline: none; border-color: #0D4E47; box-shadow: 0 0 0 3px rgba(13,78,71,0.1); }
+
+.controls {
+  display: flex; gap: 6px;
+  padding: 12px 24px;
+  background: #FAFAFA; border-bottom: 1px solid #F0F0F0;
+}
+.controls button {
+  flex: 1; padding: 8px; font-family: inherit; font-size: 12px; font-weight: 600;
+  background: #FFF; border: 1px solid #E0E0E0; border-radius: 6px;
+  cursor: pointer; color: #555; transition: all 0.15s;
+}
+.controls button:hover { border-color: #0D4E47; color: #0D4E47; }
+.controls button.active {
+  background: #0D4E47; color: #FFF; border-color: #0D4E47;
+  box-shadow: 0 1px 3px rgba(13,78,71,0.3);
+}
+
+details.sector-filter {
+  padding: 12px 24px;
+  border-bottom: 1px solid #F0F0F0;
+  background: #FAFAFA;
+}
+details.sector-filter summary {
+  cursor: pointer; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px; color: #666;
+  user-select: none; list-style: none;
+  display: flex; align-items: center; gap: 6px;
+}
+details.sector-filter summary::-webkit-details-marker { display: none; }
+details.sector-filter summary::before { content: '▸'; transition: transform 0.2s; display: inline-block; font-size: 10px; }
+details.sector-filter[open] summary::before { transform: rotate(90deg); }
+
+.sector-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.sector-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 100px;
+  font-size: 11px; font-weight: 600; color: #444;
+  background: #FFF; border: 1px solid #E0E0E0;
+  cursor: pointer; transition: all 0.15s;
+  user-select: none;
+}
+.sector-pill:hover { border-color: var(--c, #0D4E47); }
+.sector-pill.selected {
+  border-color: var(--c, #0D4E47);
+  background: var(--c, #0D4E47);
+  color: #FFF;
+}
+.sector-pill .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--c, #0D4E47);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.1);
+}
+.sector-pill.selected .dot { background: #FFF; box-shadow: none; }
+.sector-pill .count { font-size: 10px; opacity: 0.75; margin-left: 2px; }
+/* Atenúa pills cuyo conteo facetado por filtros activos es 0. Sigue
+   siendo clicable por si el usuario quiere combinar con su selección. */
+.sector-pill.empty:not(.selected) { opacity: 0.4; }
+
+.results-header {
+  padding: 12px 24px 8px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.9px;
+  color: #5F6B68; font-weight: 700;
+  background: #FFF;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.results-header strong { color: #0D4E47; font-weight: 700; }
+.btn-clear {
+  background: transparent;
+  border: 1px solid #C8D2CF;
+  border-radius: 100px;
+  padding: 4px 11px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #0D4E47;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.btn-clear:hover, .btn-clear:focus-visible {
+  background: #0D4E47;
+  color: #FFF;
+  border-color: #0D4E47;
+}
+.btn-clear[hidden] { display: none; }
+
+.entity-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 16px 20px;
+}
+.entity-card {
+  display: flex; align-items: center;
+  padding: 10px 12px;
+  background: #FFF;
+  border: 1px solid #ECECEC; border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+.entity-card:hover {
+  border-color: #0D4E47;
+  box-shadow: 0 3px 12px rgba(13,78,71,0.1);
+  transform: translateY(-1px);
+}
+.entity-card.selected {
+  border-color: var(--c, #0D4E47);
+  background: #F7FAF9;
+  box-shadow: 0 0 0 1px var(--c, #0D4E47), 0 3px 12px rgba(13,78,71,0.12);
+}
+.entity-card .sector-bar {
+  width: 4px; align-self: stretch; border-radius: 2px;
+  background: var(--c, #999);
+  flex-shrink: 0;
+}
+.entity-card .card-logo {
+  width: 44px; height: 44px; flex-shrink: 0;
+  border-radius: 8px; overflow: hidden;
+  background: var(--c, #999);
+  display: flex; align-items: center; justify-content: center;
+  color: #FFF; font-weight: 700; font-size: 13px;
+  letter-spacing: 0.5px;
+}
+.entity-card .card-logo img {
+  width: 100%; height: 100%; object-fit: contain;
+  background: #FFF;
+}
+.entity-card .card-body { flex: 1; min-width: 0; }
+.entity-card .name {
+  font-size: 13px; font-weight: 600; color: #222;
+  margin-bottom: 4px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.entity-card .location {
+  font-size: 11.5px; color: var(--c, #999);
+  font-weight: 600; line-height: 1.3;
+}
+.entity-card .sector-label {
+  font-size: 9.5px; color: #5F6B68;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+
+.empty {
+  text-align: center; color: #5F6B68; padding: 36px 20px;
+  font-size: 13px; font-style: italic;
+}
+
+.mapboxgl-popup-content {
+  padding: 16px 18px; border-radius: 10px;
+  font-family: 'Montserrat', sans-serif;
+  max-width: 320px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+}
+.mapboxgl-popup-content h3 {
+  font-size: 14px; color: #0D4E47;
+  margin-bottom: 8px; line-height: 1.3;
+}
+.mapboxgl-popup-content .pop-pill {
+  display: inline-block; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.6px; padding: 3px 9px; border-radius: 100px;
+  color: #FFF; font-weight: 700; margin-bottom: 10px;
+}
+.mapboxgl-popup-content .pop-meta {
+  font-size: 12px; color: #555; margin-bottom: 6px; line-height: 1.4;
+}
+.mapboxgl-popup-content .pop-meta strong { color: #333; }
+.mapboxgl-popup-content .pop-links {
+  display: flex; gap: 12px; margin-top: 12px;
+  flex-wrap: wrap; font-size: 12px;
+}
+.mapboxgl-popup-content .pop-links a {
+  color: #F55654; text-decoration: none; font-weight: 600;
+}
+.mapboxgl-popup-content .pop-links a:hover { text-decoration: underline; }
+
+/* Banner contextual del mapa: por defecto oculto (hidden). Solo se muestra
+   cuando hay un aviso real (entidades descartadas por datos corruptos, etc.). */
+.map-banner {
+  position: absolute; bottom: 12px; left: 12px;
+  background: rgba(13, 78, 71, 0.95); color: #FFF;
+  padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  z-index: 1; box-shadow: 0 2px 10px rgba(0,0,0,.2);
+  max-width: 360px; line-height: 1.4;
+}
+.map-banner[hidden] { display: none; }
+.map-banner.warning { background: rgba(176, 82, 101, 0.95); }
+:focus-visible {
+  outline: 2px solid #0D4E47;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.sector-pill:focus-visible, .entity-card:focus-visible, .controls button:focus-visible, .back-button:focus-visible {
+  outline-offset: 2px;
+}
+
+/* Patrón estándar para texto solo accesible a lectores de pantalla. */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.drag-handle { display: none; }
+
+.detail-logo-block {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 14px;
+}
+.detail-logo {
+  width: 64px; height: 64px;
+  border-radius: 12px; overflow: hidden;
+  background: var(--c, #999);
+  display: flex; align-items: center; justify-content: center;
+  color: #FFF; font-weight: 700; font-size: 22px;
+  flex-shrink: 0;
+}
+.detail-logo img { width: 100%; height: 100%; object-fit: contain; background: #FFF; }
+.detail-logo-block .detail-name { margin: 0; flex: 1; }
+
+@media (max-width: 768px) {
+  #container { flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; position: relative; }
+  #map { flex: 1; width: 100%; height: 100vh; height: 100dvh; }
+  #sidebar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    width: 100%;
+    height: 72vh;
+    border-right: 0;
+    border-top: 1px solid #E8E8E8;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 28px rgba(0,0,0,0.2);
+    transform: translateY(calc(100% - 138px));
+    transition: transform 0.32s cubic-bezier(.4,.0,.2,1);
+    z-index: 10;
+  }
+  #sidebar.expanded { transform: translateY(0) !important; }
+  .drag-handle {
+    display: block;
+    position: relative;
+    height: 22px;
+    cursor: pointer;
+    flex-shrink: 0;
+    background: transparent;
+    border: 0;
+    width: 100%;
+  }
+  .drag-handle::before {
+    content: '';
+    position: absolute;
+    top: 8px; left: 50%; transform: translateX(-50%);
+    width: 44px; height: 4px;
+    background: #CCC; border-radius: 2px;
+  }
+  .sidebar-header { padding-top: 4px; }
+  .map-banner { bottom: 8px; left: 8px; font-size: 11px; padding: 6px 10px; max-width: calc(100% - 16px); }
+}
+
+.view-list { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.view-list.hidden { display: none; }
+.view-detail { display: none; flex-direction: column; flex: 1; overflow-y: auto; }
+.view-detail.active { display: flex; }
+
+.back-button {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 24px;
+  background: #FAFAFA; border: 0; border-bottom: 1px solid #F0F0F0;
+  cursor: pointer; width: 100%;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: #555; transition: all 0.15s;
+  text-align: left;
+}
+.back-button:hover { background: #F2F2F2; color: #0D4E47; }
+.back-button .arrow { font-size: 14px; line-height: 1; }
+
+.detail-content { padding: 20px 24px 32px; }
+.detail-name { font-size: 18px; font-weight: 700; color: #0D4E47; line-height: 1.3; margin-bottom: 10px; }
+.detail-pill {
+  display: inline-block; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.6px; padding: 4px 10px; border-radius: 100px;
+  color: #FFF; font-weight: 700; margin-bottom: 18px;
+}
+.detail-section { margin-bottom: 16px; }
+.detail-section-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+  color: #5F6B68; font-weight: 700; margin-bottom: 4px;
+}
+.detail-section-value {
+  font-size: 13px; color: #333; line-height: 1.5;
+}
+.detail-section-value.loading { color: #BBB; font-style: italic; }
+.detail-section-value.empty { color: #BBB; font-style: italic; }
+
+.detail-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #F0F0F0; }
+.detail-action {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 14px; border-radius: 8px;
+  text-decoration: none; font-family: inherit; font-size: 13px; font-weight: 600;
+  border: 1px solid #E0E0E0; background: #FFF; color: #444;
+  cursor: pointer; transition: all 0.15s;
+}
+.detail-action:hover { border-color: #0D4E47; color: #0D4E47; background: #F2F8F7; }
+.detail-action.primary { background: #0D4E47; color: #FFF; border-color: #0D4E47; }
+.detail-action.primary:hover { background: #0a3d37; color: #FFF; }
+
+.detail-links-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.detail-link-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 100px;
+  background: #F2F2F2; color: #444; text-decoration: none;
+  font-size: 11px; font-weight: 600;
+  transition: all 0.15s;
+}
+.detail-link-chip:hover { background: #F55654; color: #FFF; }
+
+/* Botón "Volver a Canarias Convive": enlace fijo en la esquina superior
+   derecha del viewport para regresar al sitio principal. z-index alto para
+   quedar por encima del canvas y los controles de Mapbox. */
+.back-to-site {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  background: #0D4E47;
+  color: #FFF;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+.back-to-site:hover { background: #0a3d37; color: #FFF; }
+</style>
+</head>
+<body>
+<div id="container">
+  <aside id="sidebar">
+    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel" aria-expanded="false"></button>
+    <header class="sidebar-header">
+      <h1>Canarias Convive</h1>
+      <p>Mapa de agentes</p>
+    </header>
+    <div class="view-list" id="view-list">
+      <div class="sidebar-search">
+        <label for="search" class="visually-hidden">Buscar entidades</label>
+        <input id="search" class="search-input" type="search" placeholder="Buscar por nombre, municipio o sector…" autocomplete="off" aria-describedby="search-help" />
+        <span id="search-help" class="visually-hidden">Filtra la lista por nombre, municipio, provincia, dirección, sector o protagonista.</span>
+      </div>
+      <div class="controls" role="group" aria-label="Vista del mapa">
+        <button type="button" id="btn-2d" class="active" aria-pressed="true">2D</button>
+        <button type="button" id="btn-3d" aria-pressed="false">3D</button>
+        <button type="button" id="btn-fit">Centrar</button>
+      </div>
+      <div id="filter-sections"></div>
+      <div class="results-header" aria-live="polite">
+        <span><strong id="results-count">—</strong> entidades</span>
+        <button type="button" id="btn-clear-filters" class="btn-clear" hidden>Limpiar filtros</button>
+      </div>
+      <div class="entity-list" id="entity-list"></div>
+    </div>
+    <div class="view-detail" id="view-detail"></div>
+  </aside>
+  <div id="map"></div>
+  <a class="back-to-site" href="https://canariasconvive.com/mapa-de-agentes/">← Volver a Canarias Convive</a>
+  <div id="map-banner" class="map-banner" hidden></div>
+</div>
+
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoiY2FuYXJpYXMtY29udml2ZSIsImEiOiJjbXBlcHlkcHcwN25pMnBxdjJmemRzY3JoIn0.o0bCnhVjEmdYbfTAbrkKWA';
+
+const STYLE_URL = 'mapbox://styles/canarias-convive/cmpeoky6e001s01sc9al820l5';
+const GEOJSON_URL = 'https://diegoalegil.github.io/canariasconvive-mapa/entities.geojson';
+const CANARIAS_BOUNDS = [[-18.5, 27.5], [-13.3, 29.5]];
+
+const ISLAND_BOUNDS = {
+  'Tenerife':       [[-16.95, 27.98], [-16.10, 28.60]],
+  'Gran Canaria':   [[-15.86, 27.71], [-15.36, 28.20]],
+  'Lanzarote':      [[-13.87, 28.85], [-13.42, 29.25]],
+  'Fuerteventura':  [[-14.56, 28.03], [-13.81, 28.78]],
+  'La Palma':       [[-18.00, 28.45], [-17.70, 28.88]],
+  'La Gomera':      [[-17.40, 28.00], [-17.07, 28.22]],
+  'El Hierro':      [[-18.18, 27.62], [-17.88, 27.85]]
+};
+
+function flyToIslands(islands) {
+  if (!map) return;
+  const opts = {
+    padding: 60,
+    duration: 1500,
+    pitch: currentMode === '3d' ? 60 : 0,
+    bearing: currentMode === '3d' ? -17 : 0
+  };
+  if (!islands || islands.size === 0) {
+    map.fitBounds(CANARIAS_BOUNDS, { ...opts, padding: 40 });
+    return;
+  }
+  let sw = [180, 90], ne = [-180, -90];
+  islands.forEach(name => {
+    const b = ISLAND_BOUNDS[name];
+    if (!b) return;
+    sw[0] = Math.min(sw[0], b[0][0]);
+    sw[1] = Math.min(sw[1], b[0][1]);
+    ne[0] = Math.max(ne[0], b[1][0]);
+    ne[1] = Math.max(ne[1], b[1][1]);
+  });
+  if (sw[0] < 180) map.fitBounds([sw, ne], opts);
+}
+
+const SECTOR_COLORS = {
+  'Sector ciudadano': '#F55654',
+  'Sector religioso': '#B15265',
+  'Sector servicios sociales': '#0D4E47',
+  'Sector empleo': '#979C30',
+  'Sector educación': '#2B6CB0',
+  'Sector deporte, ocio y cultura': '#DD6B20',
+  'Sector económico/comercial': '#6B46C1',
+  'Sin sector': '#6E6E6E'
+};
+
+function normalize(s) {
+  return (s || '').toString().toLowerCase()
+    .normalize('NFC').normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+const LOGO_BASE = 'https://api.canariasconvive.com/rest/uploaded/entities/';
+const STOPWORDS = new Set(['de','del','la','las','el','los','y','en','a','al','con','para','por','un','una']);
+
+function getInitials(name) {
+  const words = (name || '').split(/\s+/).filter(w => w && /[A-Za-zÀ-ÿ]/.test(w[0]) && !STOPWORDS.has(w.toLowerCase()));
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+function buildLogoHTML(p) {
+  const initials = escapeHTML(getInitials(p.name));
+  if (p.logo) {
+    // Sin onerror inline para permitir Content-Security-Policy estricta sin
+    // 'unsafe-inline'. El fallback se cablea con addEventListener después de
+    // insertar el HTML, vía attachLogoFallbacks().
+    return `<img class="logo-img" src="${LOGO_BASE}${escapeHTML(p.logo)}.png" loading="lazy" alt="" /><span class="logo-fallback" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;">${initials}</span>`;
+  }
+  return `<span>${initials}</span>`;
+}
+
+// Wire el fallback de logo (img → iniciales) a cada <img.logo-img> dentro de
+// `container`. Reemplaza al antiguo onerror inline, que bloquea CSP estricta.
+function attachLogoFallbacks(container) {
+  if (!container) return;
+  container.querySelectorAll('img.logo-img').forEach(img => {
+    img.addEventListener('error', () => {
+      const parent = img.parentNode;
+      if (parent) parent.classList.add('no-logo');
+      img.style.display = 'none';
+      const fallback = img.nextElementSibling;
+      if (fallback) fallback.style.display = 'flex';
+    }, { once: true });
+  });
+}
+
+function hashId(id) {
+  let h = 0;
+  const s = id || '';
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+function buildingFeature(f) {
+  const [lng, lat] = f.geometry.coordinates;
+  const sector = f.properties.sector;
+  const color = SECTOR_COLORS[sector] || '#999';
+  const h = hashId(f.properties.id);
+  const widthM = 26 + (h % 16);
+  const lengthM = 36 + ((h >> 4) % 24);
+  const rotation = (h >> 8) % 90;
+  const height = 45 + ((h >> 12) % 60);
+  const widthDeg = widthM / (111000 * Math.cos(lat * Math.PI / 180));
+  const lengthDeg = lengthM / 111000;
+  const rect = turf.bboxPolygon([
+    lng - widthDeg / 2, lat - lengthDeg / 2,
+    lng + widthDeg / 2, lat + lengthDeg / 2
+  ]);
+  const rotated = turf.transformRotate(rect, rotation, { pivot: [lng, lat] });
+  rotated.properties = {
+    id: f.properties.id,
+    sector,
+    color,
+    height
+  };
+  return rotated;
+}
+
+let GEOJSON = null;
+let map = null;
+let searchQuery = '';
+let currentMode = '2d';
+let zonesData = null;
+const seenMapErrors = new Set();
+
+// === FILTROS DINÁMICOS ===
+// Los filtros se generan a partir de las columnas del Sheet (props._filters).
+// activeFilters: { nombreDimensión: Set(valoresSeleccionados) }.
+// filterDims: [ { name, values:[...] } ] — dimensiones mostrables, orden estable.
+let activeFilters = {};
+let filterDims = [];
+
+// Columnas que NUNCA son filtro (identidad, texto libre, contacto, coords).
+const FILTER_BLOCKLIST = new Set([
+  'ID', 'Nombre', 'Dirección', 'Latitud', 'Longitud',
+  'Teléfonos', 'Emails', 'Web', 'Facebook', 'Instagram', 'Twitter', 'Logo ID'
+]);
+// Si una columna tiene más de N valores distintos es texto libre → no es filtro.
+const FILTER_MAX_CARDINALITY = 40;
+// Dimensión que, al filtrarse, dispara vuelo de cámara en el mapa.
+const FLYTO_DIM = 'Isla';
+// Orden preferente de las secciones de filtro (el resto va alfabético detrás).
+const FILTER_DIM_ORDER = ['Isla', 'Sector', 'Tipología', 'Protagonista', 'Municipio', 'Provincia'];
+
+// Devuelve el dict de dimensiones de filtro de una feature. Usa props._filters
+// (que emite la Action con TODAS las columnas no bloqueadas). Si un geojson
+// antiguo no lo trae, lo deriva de las columnas conocidas (degradación elegante).
+function featureFilters(f) {
+  const p = f.properties;
+  if (p._filters && typeof p._filters === 'object') return p._filters;
+  const out = {};
+  if (p.sector) out['Sector'] = p.sector;
+  if (p.typology) out['Tipología'] = p.typology;
+  if (p.protagonist) out['Protagonista'] = p.protagonist;
+  if (p.island) out['Isla'] = p.island;
+  if (p.municipality) out['Municipio'] = p.municipality;
+  if (p.province) out['Provincia'] = p.province;
+  return out;
+}
+
+// Calcula qué dimensiones son filtrables: descarta lista negra, columnas con
+// un solo valor (no aportan) y las de demasiada cardinalidad (texto libre).
+function computeFilterDims() {
+  const byDim = {};
+  GEOJSON.features.forEach(f => {
+    const ff = featureFilters(f);
+    for (const dim in ff) {
+      if (FILTER_BLOCKLIST.has(dim)) continue;
+      const val = ff[dim];
+      if (val === undefined || val === null || val === '') continue;
+      (byDim[dim] = byDim[dim] || new Set()).add(String(val));
+    }
+  });
+  filterDims = Object.keys(byDim)
+    .filter(dim => byDim[dim].size >= 2 && byDim[dim].size <= FILTER_MAX_CARDINALITY)
+    .map(dim => ({ name: dim, values: [...byDim[dim]].sort((a, b) => a.localeCompare(b, 'es')) }));
+  filterDims.sort((a, b) => {
+    const ia = FILTER_DIM_ORDER.indexOf(a.name), ib = FILTER_DIM_ORDER.indexOf(b.name);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.name.localeCompare(b.name, 'es');
+  });
+  // Inicializa un Set por dimensión.
+  filterDims.forEach(d => { if (!activeFilters[d.name]) activeFilters[d.name] = new Set(); });
+}
+
+// Id de la entidad actualmente seleccionada (panel de detalle abierto).
+// Se usa para sincronizar el halo en el mapa y la clase .selected en la card.
+let selectedEntityId = null;
+
+// Marca una entidad como seleccionada y refleja el cambio en mapa + lista.
+// Pasar null deselecciona todo.
+function setSelectedEntity(id) {
+  selectedEntityId = id || null;
+  if (map && map.getLayer('selected-halo')) {
+    map.setFilter('selected-halo', ['==', ['get', 'id'], selectedEntityId || '__none__']);
+  }
+  // Lista: quita .selected de todas y aplica a la card actual (si está visible).
+  document.querySelectorAll('.entity-card.selected').forEach(c => {
+    c.classList.remove('selected');
+    c.removeAttribute('aria-pressed');
+  });
+  if (selectedEntityId) {
+    const card = document.querySelector(`.entity-card[data-id="${CSS.escape(selectedEntityId)}"]`);
+    if (card) {
+      card.classList.add('selected');
+      card.setAttribute('aria-pressed', 'true');
+    }
+  }
+}
+
+// Bounds de Canarias con un poco de aire para que el usuario pueda navegar
+// sin perderse en el Atlántico. Estos bounds se usan como vista por defecto
+// y como maxBounds del mapa para evitar que el usuario acabe en África.
+const CANARIAS_NAV_BOUNDS = [[-19.5, 26.5], [-12.3, 30.5]];
+
+// Valida que una geometría tenga coordenadas numéricas finitas dentro de los
+// rangos válidos de lat/lng. Rechaza null/string/Infinity/NaN/fuera de rango.
+function hasValidCoords(f) {
+  const c = f && f.geometry && f.geometry.coordinates;
+  if (!Array.isArray(c) || c.length !== 2) return false;
+  const [lng, lat] = c;
+  if (typeof lng !== 'number' || typeof lat !== 'number') return false;
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
+  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) return false;
+  return true;
+}
+
+function showMapBanner(text, variant = 'info') {
+  const el = document.getElementById('map-banner');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('warning', variant === 'warning');
+  el.hidden = false;
+}
+
+function showFatalDataError(message) {
+  const list = document.getElementById('entity-list');
+  if (list) list.innerHTML = `<div class="empty">${escapeHTML(message)}</div>`;
+  const count = document.getElementById('results-count');
+  if (count) count.textContent = '!';
+}
+
+async function load() {
+  let raw;
+  try {
+    const resp = await fetch(GEOJSON_URL);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    raw = await resp.json();
+  } catch (err) {
+    console.error('Error cargando entities.geojson:', err);
+    showFatalDataError('No se pudieron cargar las entidades. Recarga la página o revisa tu conexión.');
+    return;
+  }
+
+  // Validación de estructura GeoJSON básica.
+  if (!raw || raw.type !== 'FeatureCollection' || !Array.isArray(raw.features)) {
+    console.error('entities.geojson no es un FeatureCollection válido');
+    showFatalDataError('Los datos de entidades no tienen el formato esperado.');
+    return;
+  }
+
+  // Filtra features con coordenadas inválidas (null, string, NaN, fuera de rango).
+  // Antes esto rompía la app entera con un canvas en blanco y sin mensaje.
+  const valid = [];
+  let invalidCount = 0;
+  for (const f of raw.features) {
+    if (hasValidCoords(f)) {
+      valid.push(f);
+    } else {
+      invalidCount++;
+      console.warn('Entidad descartada por coordenadas inválidas:', f && f.properties && f.properties.name);
+    }
+  }
+
+  if (valid.length === 0) {
+    showFatalDataError('No hay entidades con ubicación válida para mostrar en el mapa.');
+    return;
+  }
+
+  GEOJSON = { type: 'FeatureCollection', features: valid };
+
+  if (invalidCount > 0) {
+    showMapBanner(`Atención: ${invalidCount} entidad${invalidCount === 1 ? '' : 'es'} sin ubicación válida no se muestra${invalidCount === 1 ? '' : 'n'} en el mapa.`, 'warning');
+  }
+
+  GEOJSON.features.forEach(f => {
+    let s = (f.properties.sector || '').trim();
+    f.properties.sector = s || 'Sin sector';
+  });
+
+  zonesData = {
+    type: 'FeatureCollection',
+    features: GEOJSON.features.map(f => buildingFeature(f))
+  };
+
+  initSidebar();
+  applyFilter();
+  initMap();
+  openEntityFromUrl();
+}
+
+// Si la URL trae ?entity=<id> y existe en el dataset, abre el panel de
+// detalle con esa entidad. Se ejecuta tras initMap para que el mapa esté listo
+// antes de volar a la ubicación.
+function openEntityFromUrl() {
+  const id = new URLSearchParams(window.location.search).get('entity');
+  if (!id) return;
+  const feat = GEOJSON.features.find(f => f.properties.id === id);
+  if (!feat) return;
+  const open = () => { flyToFeature(feat); showDetail(feat, { skipUrl: true }); };
+  if (map && map.loaded()) open(); else if (map) map.once('load', open);
+}
+
+function initSidebar() {
+  computeFilterDims();
+
+  // Construye una sección <details> por dimensión de filtro detectada.
+  const container = document.getElementById('filter-sections');
+  container.innerHTML = '';
+  filterDims.forEach((dim, di) => {
+    const det = document.createElement('details');
+    det.className = 'sector-filter';
+    if (di < 2) det.open = true;  // las dos primeras abiertas por defecto
+    const summary = document.createElement('summary');
+    summary.textContent = 'Filtrar por ' + dim.name.toLowerCase();
+    det.appendChild(summary);
+    const wrap = document.createElement('div');
+    wrap.className = 'sector-pills';
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', 'Filtrar por ' + dim.name);
+
+    dim.values.forEach(val => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'sector-pill';
+      pill.setAttribute('aria-pressed', 'false');
+      // El Sector colorea su pill con la paleta; el resto usa el verde corporativo.
+      const isSector = dim.name === 'Sector';
+      pill.style.setProperty('--c', isSector ? (SECTOR_COLORS[val] || '#6E6E6E') : '#0D4E47');
+      const dot = isSector ? '<span class="dot"></span>' : '';
+      pill.innerHTML = `${dot}<span>${escapeHTML(val)}</span><span class="count"></span>`;
+      pill.dataset.dim = dim.name;
+      pill.dataset.value = val;
+      pill.addEventListener('click', () => {
+        const set = activeFilters[dim.name];
+        const selected = !set.has(val);
+        if (selected) set.add(val); else set.delete(val);
+        pill.classList.toggle('selected', selected);
+        pill.setAttribute('aria-pressed', String(selected));
+        applyFilter();
+        syncFilterStateToUrl();
+        if (dim.name === FLYTO_DIM) flyToIslands(activeFilters[FLYTO_DIM]);
+      });
+      wrap.appendChild(pill);
+    });
+    det.appendChild(wrap);
+    container.appendChild(det);
+  });
+
+  document.getElementById('search').addEventListener('input', (e) => {
+    searchQuery = normalize(e.target.value);
+    applyFilter();
+    syncFilterStateToUrl();
+  });
+
+  const dragHandle = document.getElementById('drag-handle');
+  if (dragHandle) {
+    dragHandle.addEventListener('click', () => {
+      const expanded = document.getElementById('sidebar').classList.toggle('expanded');
+      dragHandle.setAttribute('aria-expanded', String(expanded));
+    });
+  }
+
+  document.getElementById('btn-2d').addEventListener('click', () => setView('2d'));
+  document.getElementById('btn-3d').addEventListener('click', () => setView('3d'));
+  document.getElementById('btn-fit').addEventListener('click', () => {
+    const btn2 = document.getElementById('btn-2d');
+    const btn3 = document.getElementById('btn-3d');
+    btn2.classList.add('active'); btn2.setAttribute('aria-pressed', 'true');
+    btn3.classList.remove('active'); btn3.setAttribute('aria-pressed', 'false');
+    currentMode = '2d';
+    setTowersVisible(false);
+    if (map) map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
+  });
+
+  const btnClear = document.getElementById('btn-clear-filters');
+  if (btnClear) btnClear.addEventListener('click', clearAllFilters);
+
+  // Restaura el estado de filtros desde la URL: marca pills, rellena búsqueda,
+  // y vuelca en los Sets internos. Sólo acepta dim/valores que existan.
+  const initial = getFilterStateFromUrl();
+  for (const dim in initial.dims) {
+    const set = activeFilters[dim];
+    if (!set) continue;
+    const known = (filterDims.find(d => d.name === dim) || {}).values || [];
+    initial.dims[dim].forEach(v => { if (known.includes(v)) set.add(v); });
+  }
+  searchQuery = normalize(initial.q);
+  document.querySelectorAll('.sector-pill[data-dim]').forEach(p => {
+    const set = activeFilters[p.dataset.dim];
+    if (set && set.has(p.dataset.value)) {
+      p.classList.add('selected');
+      p.setAttribute('aria-pressed', 'true');
+    }
+  });
+  if (initial.q) {
+    const search = document.getElementById('search');
+    if (search) search.value = initial.q;
+  }
+}
+
+// Estado compartido en URL — permite copiar/pegar la dirección y reproducir
+// exactamente la vista filtrada que tenía un usuario. Los Sets se serializan
+// con coma como separador (los valores no contienen comas en este dataset).
+// Estado de filtros en URL. Cada dimensión se serializa con su propio nombre
+// como clave (?Sector=...&Isla=...&q=...). 'q' y 'entity' se reservan.
+function getFilterStateFromUrl() {
+  const p = new URLSearchParams(window.location.search);
+  const split = s => s ? s.split(',').map(x => x.trim()).filter(Boolean) : [];
+  const dims = {};
+  for (const [key, value] of p.entries()) {
+    if (key === 'q' || key === 'entity') continue;
+    dims[key] = split(value);
+  }
+  return { dims, q: p.get('q') || '' };
+}
+
+function syncFilterStateToUrl() {
+  const url = new URL(window.location.href);
+  // Limpia params de dimensiones previos (todo lo que no sea q/entity).
+  [...url.searchParams.keys()].forEach(k => {
+    if (k !== 'q' && k !== 'entity') url.searchParams.delete(k);
+  });
+  for (const dim in activeFilters) {
+    const vals = [...activeFilters[dim]];
+    if (vals.length) url.searchParams.set(dim, vals.join(','));
+  }
+  if (searchQuery) url.searchParams.set('q', searchQuery);
+  else url.searchParams.delete('q');
+  // replaceState (no pushState) para no llenar el historial con cada tecla.
+  history.replaceState(null, '', url.toString());
+}
+
+function hasActiveFilters() {
+  if (searchQuery.length > 0) return true;
+  return Object.values(activeFilters).some(set => set.size > 0);
+}
+
+function clearAllFilters() {
+  for (const dim in activeFilters) activeFilters[dim].clear();
+  searchQuery = '';
+  document.querySelectorAll('.sector-pill.selected').forEach(p => {
+    p.classList.remove('selected');
+    p.setAttribute('aria-pressed', 'false');
+  });
+  const search = document.getElementById('search');
+  if (search) search.value = '';
+  applyFilter();
+  syncFilterStateToUrl();
+}
+
+function matchesSearch(props) {
+  if (!searchQuery) return true;
+  // Búsqueda solo en campos de identidad: nombre, ubicación, sector, protagonista.
+  // No incluye typology porque su texto contiene ejemplos hardcoded ("Cáritas, Cruz Roja...")
+  // que generan falsos positivos masivos. Para filtrar por tipología, usar el panel de filtros explícito.
+  const fields = [
+    props.name, props.municipality, props.province, props.address,
+    props.sector, props.protagonist
+  ].map(normalize);
+  return fields.some(f => f.includes(searchQuery));
+}
+
+// Una feature pasa si, para cada dimensión con selección activa, su valor en
+// esa dimensión está seleccionado. AND entre dimensiones, OR dentro de cada una.
+function passesFilters(f, ignoreDim) {
+  const ff = featureFilters(f);
+  for (const dim in activeFilters) {
+    if (dim === ignoreDim) continue;
+    const set = activeFilters[dim];
+    if (set.size === 0) continue;
+    if (!set.has(String(ff[dim] == null ? '' : ff[dim]))) return false;
+  }
+  return true;
+}
+
+function getFilteredFeatures() {
+  return GEOJSON.features.filter(f => passesFilters(f, null) && matchesSearch(f.properties));
+}
+
+// Recalcula los conteos de cada pill excluyendo el filtro de su propia
+// dimensión: si filtras por "Tenerife", las pills de sector muestran cuántas
+// entidades hay EN Tenerife por sector. La leyenda guía el subset visible.
+function updateFacetedCounts() {
+  if (!GEOJSON) return;
+  const counts = {};
+  filterDims.forEach(d => { counts[d.name] = {}; });
+  GEOJSON.features.forEach(f => {
+    if (!matchesSearch(f.properties)) return;
+    const ff = featureFilters(f);
+    filterDims.forEach(d => {
+      if (!passesFilters(f, d.name)) return;
+      const v = String(ff[d.name] == null ? '' : ff[d.name]);
+      if (v) counts[d.name][v] = (counts[d.name][v] || 0) + 1;
+    });
+  });
+  document.querySelectorAll('.sector-pill[data-dim]').forEach(p => {
+    const n = (counts[p.dataset.dim] || {})[p.dataset.value] || 0;
+    const countEl = p.querySelector('.count');
+    if (countEl) countEl.textContent = n;
+    p.classList.toggle('empty', n === 0);
+  });
+}
+
+function applyFilter() {
+  const filtered = getFilteredFeatures();
+  if (map && map.getSource('entities')) {
+    map.getSource('entities').setData({
+      type: 'FeatureCollection',
+      features: filtered
+    });
+    if (map.getSource('zones')) {
+      const filteredIds = new Set(filtered.map(f => f.properties.id));
+      map.getSource('zones').setData({
+        type: 'FeatureCollection',
+        features: zonesData.features.filter(z => filteredIds.has(z.properties.id))
+      });
+    }
+  }
+  document.getElementById('results-count').textContent = filtered.length;
+  renderEntityList(filtered);
+  updateFacetedCounts();
+  // Muestra el botón "Limpiar filtros" solo cuando hay alguno activo.
+  const btnClear = document.getElementById('btn-clear-filters');
+  if (btnClear) btnClear.hidden = !hasActiveFilters();
+}
+
+function renderEntityList(features) {
+  const list = document.getElementById('entity-list');
+  if (features.length === 0) {
+    list.innerHTML = '<div class="empty">No se encontraron entidades con esos filtros.</div>';
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  const sorted = features.slice().sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'es'));
+  sorted.slice(0, 120).forEach(f => {
+    const p = f.properties;
+    const color = SECTOR_COLORS[p.sector] || '#999';
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'entity-card' + (p.id === selectedEntityId ? ' selected' : '');
+    card.dataset.id = p.id;
+    if (p.id === selectedEntityId) card.setAttribute('aria-pressed', 'true');
+    card.setAttribute('aria-label', `${p.name}, ${p.sector}`);
+    card.style.setProperty('--c', color);
+    const loc = [p.municipality, p.province].filter(Boolean).join(', ') || p.island || p.sector;
+    card.innerHTML = `
+      <div class="sector-bar"></div>
+      <div class="card-logo">${buildLogoHTML(p)}</div>
+      <div class="card-body">
+        <div class="name">${escapeHTML(p.name)}</div>
+        <div class="location">${escapeHTML(loc)}</div>
+        ${(p.municipality || p.island) ? `<div class="sector-label">${escapeHTML(p.sector)}</div>` : ''}
+      </div>
+    `;
+    attachLogoFallbacks(card);
+    card.addEventListener('click', () => {
+      flyToFeature(f);
+      showDetail(f);
+    });
+    frag.appendChild(card);
+  });
+  if (sorted.length > 120) {
+    const note = document.createElement('div');
+    note.className = 'empty';
+    note.textContent = `+${sorted.length - 120} entidades más · afina la búsqueda`;
+    frag.appendChild(note);
+  }
+  list.innerHTML = '';
+  list.appendChild(frag);
+}
+
+function flyToFeature(f) {
+  if (!map) return;
+  const coords = f.geometry.coordinates;
+  const pitchKeep = currentMode === '3d' ? 65 : 0;
+  const bearingKeep = currentMode === '3d' ? -17 : 0;
+  map.flyTo({ center: coords, zoom: 16, pitch: pitchKeep, bearing: bearingKeep, duration: 1500 });
+}
+
+function formatMapError(err, event) {
+  const parts = [];
+  const normalizeValue = (key, value) => {
+    const text = String(value);
+    if (key !== 'url') return text;
+    try {
+      const url = new URL(text);
+      const path = url.pathname
+        .replace(/\/\d+\/\d+\/\d+\.vector\.pbf$/, '/{z}/{x}/{y}.vector.pbf')
+        .replace(/\/\d+\/\d+\/\d+\.glb$/, '/{z}/{x}/{y}.glb');
+      return `${url.origin}${path}`;
+    } catch (_) {
+      return text.replace(/access_token=[^&\s]+/g, 'access_token=<redacted>');
+    }
+  };
+  const collect = (obj, keys) => {
+    if (!obj) return;
+    keys.forEach(key => {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') {
+        parts.push(`${key}=${normalizeValue(key, value)}`);
+      }
+    });
+  };
+  collect(err, ['message', 'name', 'status', 'statusCode', 'url', 'resource', 'sourceId']);
+  collect(event, ['sourceId', 'sourceLayer', 'tileID']);
+  return parts.join(' ') || String(err || event || 'unknown');
+}
+
+function escapeHTML(s) {
+  return (s || '').toString()
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Lista de parámetros de tracking que strippeamos al construir enlaces.
+// fbclid/gclid/mc_*: Facebook/Google Ads/Mailchimp. utm_*: UTM. ref/_ga: otros.
+const TRACKING_PARAMS = /^(fbclid|gclid|mc_(?:eid|cid)|utm_[a-z]+|ref|_ga|_gl|igshid|yclid|msclkid)$/i;
+
+function cleanUrl(u) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (!s || s.toLowerCase() === 'null') return '';
+  const m = s.match(/https?:\/\/[^\s"'<>,)]+/i);
+  if (!m) return '';
+  let raw = m[0].replace(/[)"',.;:!]+$/, '');
+  // Strip tracking params (fbclid, utm_*, gclid...) preservando los útiles.
+  try {
+    const parsed = new URL(raw);
+    const keep = [];
+    parsed.searchParams.forEach((v, k) => { if (!TRACKING_PARAMS.test(k)) keep.push([k, v]); });
+    parsed.search = '';
+    keep.forEach(([k, v]) => parsed.searchParams.append(k, v));
+    // Si la URL terminaba con '/' antes del query, conservar trailing slash limpio
+    raw = parsed.toString().replace(/\?$/, '');
+  } catch (_) { /* URL inválida — devolver tal cual */ }
+  return raw;
+}
+
+function cleanPhone(s) {
+  if (!s) return '';
+  let v = String(s).trim().replace(/^(tel|telefono|tlf|telef)[:.\s]+/i, '');
+  v = v.replace(/[^\d+\-()\s]/g, '');
+  v = v.replace(/\(\s*\)/g, '');
+  v = v.replace(/\s+/g, ' ').trim();
+  const digits = v.replace(/\D/g, '');
+  return digits.length >= 7 ? v : '';
+}
+
+function cleanEmail(s) {
+  if (!s) return '';
+  const v = String(s).trim().replace(/^mailto:/i, '').toLowerCase();
+  return /^[\w.+-]+@[\w.-]+\.\w+$/.test(v) ? v : '';
+}
+
+function buildLinkChip(href, label) {
+  const clean = cleanUrl(href);
+  if (!clean) return '';
+  return `<a class="detail-link-chip" href="${escapeHTML(clean)}" target="_blank" rel="noopener">${label}</a>`;
+}
+
+function renderDetail(feature) {
+  const p = feature.properties;
+  const color = SECTOR_COLORS[p.sector] || '#999';
+  const links = [
+    buildLinkChip(p.url, 'Web'),
+    buildLinkChip(p.facebook, 'Facebook'),
+    buildLinkChip(p.instagram, 'Instagram'),
+    buildLinkChip(p.twitter, 'Twitter')
+  ].filter(Boolean).join('');
+
+  // Address may come as a string or as a list — normalize
+  let phones = p.phones || [];
+  let emails = p.emails || [];
+  if (typeof phones === 'string') { try { phones = JSON.parse(phones); } catch(e) { phones = phones ? [phones] : []; } }
+  if (typeof emails === 'string') { try { emails = JSON.parse(emails); } catch(e) { emails = emails ? [emails] : []; } }
+
+  const locationParts = [p.municipality, p.province].filter(Boolean).join(', ');
+  const fullAddress = p.address || locationParts || '';
+
+  const addressBlock = fullAddress
+    ? `<div class="detail-section"><div class="detail-section-label">Dirección</div><div class="detail-section-value">${escapeHTML(fullAddress)}</div></div>`
+    : (locationParts ? `<div class="detail-section"><div class="detail-section-label">Ubicación</div><div class="detail-section-value">${escapeHTML(locationParts)}</div></div>` : '');
+
+  const cleanPhones = phones.map(cleanPhone).filter(Boolean);
+  const cleanEmails = emails.map(cleanEmail).filter(Boolean);
+  let phonesBlock = '';
+  if (cleanPhones.length) {
+    phonesBlock = `<div class="detail-section"><div class="detail-section-label">Teléfono</div><div class="detail-section-value">${cleanPhones.map(x => `<a href="tel:${escapeHTML(x.replace(/\s/g,''))}" style="color:#0D4E47;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
+  }
+  let emailsBlock = '';
+  if (cleanEmails.length) {
+    emailsBlock = `<div class="detail-section"><div class="detail-section-label">Email</div><div class="detail-section-value">${cleanEmails.map(x => `<a href="mailto:${escapeHTML(x)}" style="color:#F55654;text-decoration:none;font-weight:600;">${escapeHTML(x)}</a>`).join('<br>')}</div></div>`;
+  }
+
+  return `
+    <button type="button" class="back-button" id="back-btn"><span class="arrow">←</span> Volver al listado</button>
+    <div class="detail-content">
+      <div class="detail-logo-block">
+        <div class="detail-logo" style="--c:${color}">${buildLogoHTML(p)}</div>
+        <h2 class="detail-name">${escapeHTML(p.name)}</h2>
+      </div>
+      <div class="detail-pill" style="background:${color}">${escapeHTML(p.sector)}</div>
+      ${p.typology ? `<div class="detail-section"><div class="detail-section-label">Tipología</div><div class="detail-section-value">${escapeHTML(p.typology)}</div></div>` : ''}
+      ${p.protagonist ? `<div class="detail-section"><div class="detail-section-label">Protagonista</div><div class="detail-section-value">${escapeHTML(p.protagonist)}</div></div>` : ''}
+      ${addressBlock}
+      ${phonesBlock}
+      ${emailsBlock}
+      ${links ? `<div class="detail-section"><div class="detail-section-label">Enlaces</div><div class="detail-links-row">${links}</div></div>` : ''}
+      <div class="detail-actions">
+        <button type="button" class="detail-action primary" id="center-btn">Centrar en el mapa</button>
+        <a class="detail-action" id="gmaps-btn" href="https://www.google.com/maps/dir/?api=1&destination=${feature.geometry.coordinates[1]},${feature.geometry.coordinates[0]}" target="_blank" rel="noopener">Cómo llegar (Google Maps)</a>
+      </div>
+    </div>
+  `;
+}
+
+function showDetail(feature, opts = {}) {
+  const viewList = document.getElementById('view-list');
+  const viewDetail = document.getElementById('view-detail');
+  viewDetail.innerHTML = renderDetail(feature);
+  attachLogoFallbacks(viewDetail);
+  viewDetail.setAttribute('tabindex', '-1');
+  viewList.classList.add('hidden');
+  viewDetail.classList.add('active');
+  viewDetail.scrollTop = 0;
+  if (window.innerWidth <= 768) {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.add('expanded');
+    const dh = document.getElementById('drag-handle');
+    if (dh) dh.setAttribute('aria-expanded', 'true');
+  }
+  const backBtn = document.getElementById('back-btn');
+  backBtn.addEventListener('click', hideDetail);
+  document.getElementById('center-btn').addEventListener('click', () => flyToFeature(feature));
+  setTimeout(() => backBtn.focus(), 0);
+  // Marca la entidad como seleccionada (halo en mapa + card resaltada).
+  setSelectedEntity(feature.properties.id);
+  if (!opts.skipUrl) {
+    const id = feature.properties.id;
+    if (id) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('entity', id);
+      history.replaceState(null, '', url.toString());
+    }
+  }
+}
+
+function hideDetail() {
+  const viewList = document.getElementById('view-list');
+  const viewDetail = document.getElementById('view-detail');
+  viewList.classList.remove('hidden');
+  viewDetail.classList.remove('active');
+  viewDetail.innerHTML = '';
+  const search = document.getElementById('search');
+  if (search) setTimeout(() => search.focus(), 0);
+  // Deselecciona la entidad y limpia el param de la URL al volver a la lista.
+  setSelectedEntity(null);
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('entity')) {
+    url.searchParams.delete('entity');
+    history.replaceState(null, '', url.toString());
+  }
+}
+
+function setView(mode) {
+  currentMode = mode;
+  const btn2 = document.getElementById('btn-2d');
+  const btn3 = document.getElementById('btn-3d');
+  btn2.classList.toggle('active', mode === '2d');
+  btn3.classList.toggle('active', mode === '3d');
+  btn2.setAttribute('aria-pressed', String(mode === '2d'));
+  btn3.setAttribute('aria-pressed', String(mode === '3d'));
+  if (!map) return;
+  if (mode === '3d') {
+    setTowersVisible(true);
+    map.easeTo({ pitch: 65, bearing: -17, duration: 1200 });
+  } else {
+    setTowersVisible(false);
+    map.easeTo({ pitch: 0, bearing: 0, duration: 1000 });
+  }
+}
+
+function setTowersVisible(visible) {
+  if (!map) return;
+  const vis = visible ? 'visible' : 'none';
+  if (map.getLayer('zones')) map.setLayoutProperty('zones', 'visibility', vis);
+}
+
+function initMap() {
+  map = new mapboxgl.Map({
+    container: 'map',
+    style: STYLE_URL,
+    center: [-15.5, 28.3],
+    zoom: 7,
+    maxZoom: 18,
+    minZoom: 5,
+    // Restringe la navegación al archipiélago + un margen. Antes el usuario
+    // podía panear hasta África y perder el contexto del mapa.
+    maxBounds: CANARIAS_NAV_BOUNDS
+  });
+
+  map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+
+  map.on('error', (e) => {
+    const err = e && e.error || e;
+    const key = formatMapError(err, e);
+    if (seenMapErrors.has(key)) return;
+    seenMapErrors.add(key);
+    console.warn(`Mapbox warning: ${key}`);
+  });
+
+  map.on('load', () => {
+    // El estilo importa Mapbox Standard, que pide sources internas como
+    // `mapbox-3d-events` y `3dbuildings`. En el plan free pueden dar 403
+    // y ensucian la consola. Como ya pintamos nuestros propios edificios
+    // sector-coloreados con el layer `zones`, los nativos son redundantes.
+    try {
+      map.setConfigProperty('basemap', 'show3dObjects', false);
+    } catch (e) { /* import config may not estar disponible en estilos antiguos */ }
+
+    map.setFog({
+      'range': [0.5, 12],
+      'horizon-blend': 0.2,
+      'color': '#E8EEF2',
+      'high-color': '#0D4E47',
+      'space-color': '#0a0e1a',
+      'star-intensity': 0.15
+    });
+
+    map.addSource('mapbox-dem', {
+      type: 'raster-dem',
+      url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+      tileSize: 512,
+      maxzoom: 14
+    });
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: 2.5 });
+
+    try {
+      map.setLight({
+        'anchor': 'viewport',
+        'color': '#FFFFFF',
+        'intensity': 0.5,
+        'position': [1.15, 90, 60]
+      });
+    } catch (e) { /* light may be locked by style */ }
+
+    map.addSource('entities', {
+      type: 'geojson',
+      data: GEOJSON,
+      cluster: true,
+      clusterRadius: 40,
+      clusterMaxZoom: 13
+    });
+
+    map.addSource('zones', { type: 'geojson', data: zonesData });
+
+    map.addLayer({
+      id: 'zones',
+      type: 'fill-extrusion',
+      source: 'zones',
+      layout: { visibility: 'none' },
+      paint: {
+        'fill-extrusion-color': ['get', 'color'],
+        'fill-extrusion-height': ['get', 'height'],
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 11, 0.55],
+        'fill-extrusion-vertical-gradient': true
+      }
+    });
+
+    map.addLayer({
+      id: 'clusters-glow',
+      type: 'circle',
+      source: 'entities',
+      filter: ['has', 'point_count'],
+      paint: {
+        'circle-color': '#0D4E47',
+        'circle-radius': ['step', ['get', 'point_count'], 30, 5, 36, 15, 44, 30, 56],
+        'circle-opacity': 0.18,
+        'circle-blur': 0.6
+      }
+    });
+
+    map.addLayer({
+      id: 'clusters',
+      type: 'circle',
+      source: 'entities',
+      filter: ['has', 'point_count'],
+      paint: {
+        'circle-color': '#0D4E47',
+        'circle-radius': ['step', ['get', 'point_count'], 18, 5, 22, 15, 28, 30, 36],
+        'circle-stroke-width': 3,
+        'circle-stroke-color': '#FFFFFF'
+      }
+    });
+
+    map.addLayer({
+      id: 'cluster-count',
+      type: 'symbol',
+      source: 'entities',
+      filter: ['has', 'point_count'],
+      layout: {
+        'text-field': '{point_count_abbreviated}',
+        'text-font': ['Montserrat Bold', 'Open Sans Bold'],
+        'text-size': 13
+      },
+      paint: { 'text-color': '#FFFFFF' }
+    });
+
+    const colorExpr = ['match', ['get', 'sector']];
+    Object.entries(SECTOR_COLORS).forEach(([s, c]) => colorExpr.push(s, c));
+    colorExpr.push('#999999');
+
+    // Halo de la entidad seleccionada: queda debajo del punto y se hace visible
+    // por filter cuando setSelectedEntity asigna un id. Antes el usuario no
+    // tenía feedback visual de qué marcador estaba mirando en la ficha.
+    map.addLayer({
+      id: 'selected-halo',
+      type: 'circle',
+      source: 'entities',
+      filter: ['==', ['get', 'id'], '__none__'],
+      paint: {
+        'circle-color': 'rgba(13, 78, 71, 0.18)',
+        'circle-radius': 22,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#0D4E47',
+        'circle-stroke-opacity': 0.7
+      }
+    });
+
+    map.addLayer({
+      id: 'unclustered-point',
+      type: 'circle',
+      source: 'entities',
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-color': colorExpr,
+        'circle-radius': 8,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#FFFFFF'
+      }
+    });
+
+    map.on('click', 'clusters', (e) => {
+      const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
+      if (!features.length) return;
+      const feat = features[0];
+      // Mapbox GL JS v3 sigue siendo callback-based aquí: el método devuelve
+      // `this` (la source) para chaining y entrega el zoom asíncronamente por
+      // el callback. Hacer await sobre el retorno daba GeoJSONSource ⇒ easeTo
+      // recibía zoom no finito y el cluster nunca expandía.
+      map.getSource('entities').getClusterExpansionZoom(feat.properties.cluster_id, (err, zoom) => {
+        if (err) { console.warn('Cluster expansion failed:', err); return; }
+        map.easeTo({ center: feat.geometry.coordinates, zoom });
+      });
+    });
+
+    map.on('click', 'unclustered-point', (e) => {
+      const clicked = e.features[0];
+      const full = GEOJSON.features.find(f => f.properties.id === clicked.properties.id) || clicked;
+      flyToFeature(full);
+      showDetail(full);
+    });
+
+    ['clusters', 'unclustered-point'].forEach(id => {
+      map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+    });
+
+    applyFilter();
+    // Si la URL trajo islas filtradas, vuela a ellas al cargar el mapa.
+    if (activeFilters[FLYTO_DIM] && activeFilters[FLYTO_DIM].size > 0) flyToIslands(activeFilters[FLYTO_DIM]);
+  });
+}
+
+load();
+</script>
+</body>
+</html>
