@@ -1,5 +1,13 @@
 # Canarias Convive · Mapa de Agentes
 
+<p>
+  <img alt="Estado: en producción" src="https://img.shields.io/badge/estado-en%20producci%C3%B3n-2EA043?style=flat-square" />
+  <a href="https://canariasconvive.com/mapa-interactivo/"><img alt="Ver en vivo" src="https://img.shields.io/badge/ver%20en%20vivo-canariasconvive.com-0D4E47?style=flat-square" /></a>
+  <img alt="Mapbox GL JS 3.21" src="https://img.shields.io/badge/Mapbox%20GL%20JS-3.21-000000?style=flat-square&logo=mapbox&logoColor=white" />
+  <img alt="Datos: sync horario" src="https://img.shields.io/badge/datos-sync%20horario-blue?style=flat-square&logo=githubactions&logoColor=white" />
+  <img alt="Licencia MIT" src="https://img.shields.io/badge/licencia-MIT-555?style=flat-square" />
+</p>
+
 > Mapa interactivo **oficial** del programa **Canarias Convive** (Fundación General de la Universidad de La Laguna).
 > **Este repositorio aloja el mapa real** que se muestra, en producción, en la web del programa.
 
