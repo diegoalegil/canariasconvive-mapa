@@ -141,8 +141,17 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
 }
 .btn-clear[hidden] { display: none; }
 
+/* Los filtros y la lista comparten el alto disponible, cada uno con su propio
+   scroll. Así, aunque el mapa vaya embebido (más bajo que pantalla completa),
+   la lista de entidades nunca se queda en 0px. */
+#filter-sections {
+  flex: 1 1 0;
+  min-height: 70px;
+  overflow-y: auto;
+}
 .entity-list {
-  flex: 1;
+  flex: 2 1 0;
+  min-height: 120px;
   overflow-y: auto;
   padding: 4px 16px 20px;
 }
@@ -1404,14 +1413,20 @@ function initMap() {
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
       if (!features.length) return;
       const feat = features[0];
-      // Mapbox GL JS v3 sigue siendo callback-based aquí: el método devuelve
-      // `this` (la source) para chaining y entrega el zoom asíncronamente por
-      // el callback. Hacer await sobre el retorno daba GeoJSONSource ⇒ easeTo
-      // recibía zoom no finito y el cluster nunca expandía.
-      map.getSource('entities').getClusterExpansionZoom(feat.properties.cluster_id, (err, zoom) => {
-        if (err) { console.warn('Cluster expansion failed:', err); return; }
-        map.easeTo({ center: feat.geometry.coordinates, zoom });
-      });
+      const center = feat.geometry.coordinates;
+      // En Mapbox GL JS v3 getClusterExpansionZoom devuelve una Promise (se
+      // eliminó la firma con callback), por eso la versión anterior con
+      // callback nunca expandía el cluster. Soportamos ambas APIs por robustez.
+      const applyZoom = (zoom) => {
+        if (typeof zoom === 'number' && isFinite(zoom)) {
+          map.easeTo({ center, zoom: Math.min(zoom + 0.5, 18) });
+        }
+      };
+      const ret = map.getSource('entities')
+        .getClusterExpansionZoom(feat.properties.cluster_id, (err, zoom) => { if (!err) applyZoom(zoom); });
+      if (ret && typeof ret.then === 'function') {
+        ret.then(applyZoom).catch((err) => console.warn('Cluster expansion failed:', err));
+      }
     });
 
     map.on('click', 'unclustered-point', (e) => {
