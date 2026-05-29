@@ -4,9 +4,8 @@
 > **Este repositorio aloja el mapa real** que se muestra, en producción, en la web del programa.
 
 🌍 **En producción:** <https://canariasconvive.com/mapa-interactivo/>
-🗺️ **Visor (GitHub Pages):** <https://diegoalegil.github.io/canariasconvive-mapa/mapa.html>
 
-![Mapa de agentes de Canarias Convive](captura-mapa.webp)
+[![Mapa de agentes de Canarias Convive](captura-mapa.webp)](https://canariasconvive.com/mapa-interactivo/)
 
 ---
 
@@ -33,7 +32,7 @@ Formulario de alta  →  Hoja oficial "Canarias Convive" (Google Sheets)
 
 La página `canariasconvive.com/mapa-interactivo/` (WordPress, plantilla en blanco) incrusta el visor **a pantalla completa** con un `<iframe>`. El botón *“Volver a Canarias Convive”* devuelve al sitio principal.
 
-![El mapa integrado en canariasconvive.com](captura-web.webp)
+[![El mapa integrado en canariasconvive.com](captura-web.webp)](https://canariasconvive.com/mapa-de-agentes/)
 
 ## Funcionalidades
 
