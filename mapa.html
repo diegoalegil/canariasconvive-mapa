@@ -915,15 +915,19 @@ function clearAllFilters() {
   syncFilterStateToUrl();
 }
 
+// Campos secundarios de búsqueda (todos menos el nombre, que se pondera aparte).
+// Fuente ÚNICA, compartida por matchesSearch y searchScore: así el filtro y el
+// orden no pueden descuadrarse si algún día se añade o quita un campo.
+// No incluye typology porque su texto contiene ejemplos hardcoded ("Cáritas, Cruz Roja...")
+// que generan falsos positivos masivos. Para filtrar por tipología, usar el panel de filtros explícito.
+function searchFields(props) {
+  return [props.municipality, props.province, props.address, props.sector, props.protagonist];
+}
+
 function matchesSearch(props) {
   if (!searchQuery) return true;
-  // Búsqueda solo en campos de identidad: nombre, ubicación, sector, protagonista.
-  // No incluye typology porque su texto contiene ejemplos hardcoded ("Cáritas, Cruz Roja...")
-  // que generan falsos positivos masivos. Para filtrar por tipología, usar el panel de filtros explícito.
-  const fields = [
-    props.name, props.municipality, props.province, props.address,
-    props.sector, props.protagonist
-  ].map(normalize);
+  // Búsqueda en campos de identidad: nombre + campos secundarios (ubicación, sector, protagonista).
+  const fields = [props.name, ...searchFields(props)].map(normalize);
   return fields.some(f => f.includes(searchQuery));
 }
 
@@ -941,8 +945,7 @@ function searchScore(props) {
   else if (name.includes(q)) score += 200;    // la búsqueda aparece en el nombre
   // Resto de campos: mucho menos peso (evita que una coincidencia en la
   // dirección/municipio adelante a una coincidencia real en el nombre).
-  const otros = [props.municipality, props.province, props.address, props.sector, props.protagonist]
-    .map(normalize);
+  const otros = searchFields(props).map(normalize);
   if (otros.some(f => f.includes(q))) score += 10;
   return score;
 }
@@ -1020,13 +1023,15 @@ function renderEntityList(features) {
   const frag = document.createDocumentFragment();
   // Con búsqueda activa, ordena por relevancia (puntuación) y desempata por
   // nombre. Sin búsqueda, mantiene el orden alfabético de siempre.
-  const sorted = features.slice().sort((a, b) => {
-    if (searchQuery) {
-      const d = searchScore(b.properties) - searchScore(a.properties);
-      if (d !== 0) return d;
-    }
-    return a.properties.name.localeCompare(b.properties.name, 'es');
-  });
+  // La puntuación se calcula UNA vez por entidad (no en cada comparación del
+  // sort): decora → ordena → recupera la feature.
+  const sorted = features
+    .map(f => ({ f, score: searchQuery ? searchScore(f.properties) : 0 }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.f.properties.name.localeCompare(b.f.properties.name, 'es');
+    })
+    .map(d => d.f);
   sorted.slice(0, 120).forEach(f => {
     const p = f.properties;
     const color = SECTOR_COLORS[p.sector] || '#999';
