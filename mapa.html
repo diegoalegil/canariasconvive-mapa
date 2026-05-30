@@ -306,7 +306,7 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
     border-top: 1px solid #E8E8E8;
     border-radius: 18px 18px 0 0;
     box-shadow: 0 -8px 28px rgba(0,0,0,0.2);
-    transform: translateY(calc(100% - 138px));
+    transform: translateY(calc(100% - 156px));
     transition: transform 0.32s cubic-bezier(.4,.0,.2,1);
     z-index: 10;
   }
@@ -314,7 +314,7 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
   .drag-handle {
     display: block;
     position: relative;
-    height: 22px;
+    height: 40px;
     cursor: pointer;
     flex-shrink: 0;
     background: transparent;
@@ -328,7 +328,19 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
     width: 44px; height: 4px;
     background: #CCC; border-radius: 2px;
   }
-  .sidebar-header { padding-top: 4px; }
+  /* Etiqueta visible: deja claro que el panel se desliza hacia arriba para ver
+     filtros y entidades. La flecha se invierte al expandir (arriba = abrir,
+     abajo = cerrar). */
+  .drag-handle-hint {
+    position: absolute;
+    top: 18px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-weight: 700; color: #0D4E47;
+    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .drag-handle-hint::after { content: " \25B2"; font-size: 9px; }
+  #sidebar.expanded .drag-handle-hint { color: #5F6B68; }
+  #sidebar.expanded .drag-handle-hint::after { content: " \25BC"; }
+  .sidebar-header { padding-top: 4px; cursor: pointer; }
   .map-banner { bottom: 8px; left: 8px; font-size: 11px; padding: 6px 10px; max-width: calc(100% - 16px); }
 }
 
@@ -408,14 +420,23 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
   padding: 8px 14px;
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  white-space: nowrap;
 }
 .back-to-site:hover { background: #0a3d37; color: #FFF; }
+
+/* Los controles de Mapbox (zoom, brújula, pantalla completa) van en la esquina
+   superior derecha, la misma que ocupa el botón "Volver a Canarias Convive".
+   Los bajamos para que no se solapen. Aplica en PC y en móvil. */
+.mapboxgl-ctrl-top-right { top: 56px; }
+@media (max-width: 768px) {
+  .mapboxgl-ctrl-top-right { top: 60px; }
+}
 </style>
 </head>
 <body>
 <div id="container">
   <aside id="sidebar">
-    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel" aria-expanded="false"></button>
+    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel" aria-expanded="false"><span class="drag-handle-hint">Entidades y filtros</span></button>
     <header class="sidebar-header">
       <h1>Canarias Convive</h1>
       <p>Mapa de agentes</p>
@@ -820,10 +841,18 @@ function initSidebar() {
   });
 
   const dragHandle = document.getElementById('drag-handle');
-  if (dragHandle) {
-    dragHandle.addEventListener('click', () => {
-      const expanded = document.getElementById('sidebar').classList.toggle('expanded');
-      dragHandle.setAttribute('aria-expanded', String(expanded));
+  const toggleSheet = () => {
+    const expanded = document.getElementById('sidebar').classList.toggle('expanded');
+    if (dragHandle) dragHandle.setAttribute('aria-expanded', String(expanded));
+  };
+  if (dragHandle) dragHandle.addEventListener('click', toggleSheet);
+  // En móvil, tocar la cabecera (título) también despliega/repliega el panel:
+  // así el área para abrirlo es mucho mayor y se descubre antes. En PC no hace
+  // nada porque la clase .expanded solo tiene efecto dentro del @media móvil.
+  const sidebarHeaderEl = document.querySelector('.sidebar-header');
+  if (sidebarHeaderEl) {
+    sidebarHeaderEl.addEventListener('click', () => {
+      if (window.innerWidth <= 768) toggleSheet();
     });
   }
 
