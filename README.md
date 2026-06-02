@@ -13,8 +13,6 @@
 
 🌍 **En producción:** <https://canariasconvive.com/mapa-interactivo/>
 
-[![Logo animado — Canarias Convive](logo-animado.webp)](https://canariasconvive.com/mapa-interactivo/)
-
 [![Mapa de agentes de Canarias Convive](captura-mapa.webp)](https://canariasconvive.com/mapa-interactivo/)
 
 ---
