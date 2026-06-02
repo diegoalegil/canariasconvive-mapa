@@ -13,7 +13,11 @@
 
 🌍 **En producción:** <https://canariasconvive.com/mapa-interactivo/>
 
-[![Mapa de agentes de Canarias Convive](captura-mapa.webp)](https://canariasconvive.com/mapa-interactivo/)
+<p align="center">
+  <a href="https://canariasconvive.com/mapa-interactivo/">
+    <img alt="Canarias Convive — Mapa de agentes" src="canarias-convive.svg" width="440" />
+  </a>
+</p>
 
 ---
 
@@ -68,13 +72,12 @@ La página `canariasconvive.com/mapa-interactivo/` (WordPress, plantilla en blan
 ```
 .
 ├── mapa.html             # El visor self-contained — el que se incrusta en la web
-├── logo-animado.html     # Widget standalone: logo animado con conteos reales por isla
+├── canarias-convive.svg  # Logo animado de carga (SVG/SMIL) — cabecera del README
 ├── index.html            # Variante con CSS externo (styles.css)
 ├── styles.css            # Estilos de index.html
 ├── guia.html             # Guía del sistema de mapas
 ├── entities.geojson      # Datos (los regenera la Action desde la hoja oficial)
 ├── entities-raw.json     # Volcado inicial de referencia
-├── logo-animado.webp     # Imagen estática del logo (para README y redes)
 ├── captura-mapa.webp     # Captura del visor en producción
 ├── captura-web.webp      # Captura de la página de agentes en canariasconvive.com
 └── .github/workflows/
