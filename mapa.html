@@ -1656,8 +1656,11 @@ load();
     // Lo quitamos del DOM tras la transición para no dejar nada por encima del mapa.
     setTimeout(function() { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 600);
   }
-  // El mapa emite 'mapbox-ready' en su evento load (estilo + datos listos).
-  document.addEventListener('mapbox-ready', hideSplash, { once: true });
+  // El mapa emite 'mapbox-ready' cuando estilo + datos están listos.
+  // Esperamos 1.8s extra para que se vea la animación completa antes de ocultar.
+  document.addEventListener('mapbox-ready', function() {
+    setTimeout(hideSplash, 1800);
+  }, { once: true });
   window.__hideSplash = hideSplash;
 })();
 </script>
