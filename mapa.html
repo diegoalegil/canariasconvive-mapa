@@ -1678,9 +1678,9 @@ load();
     setTimeout(function() { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 600);
   }
   // El mapa emite 'mapbox-ready' cuando estilo + datos están listos.
-  // Esperamos 3.5s extra para que se vea la animación completa antes de ocultar.
+  // Esperamos 2.8s extra para que se vea la animación completa antes de ocultar.
   document.addEventListener('mapbox-ready', function() {
-    setTimeout(hideSplash, 3500);
+    setTimeout(hideSplash, 2800);
   }, { once: true });
   window.__hideSplash = hideSplash;
 })();
