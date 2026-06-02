@@ -477,6 +477,26 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
   font-size: 13px; letter-spacing: .26em; text-transform: uppercase;
   color: #0d4e47; font-weight: 600;
 }
+.sp-loading {
+  position: absolute; top: 618px; left: 0; right: 0; text-align: center;
+  font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+  color: #a7a597; font-weight: 600;
+}
+/* Puntos suspensivos animados */
+.sp-loading::after {
+  content: '';
+  animation: spDots 1.4s steps(4, end) infinite;
+}
+@keyframes spDots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+  100% { content: ''; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sp-loading { opacity: 0; animation: spFade 1s 2s ease both; }
+}
 /* animaciones (respeta prefers-reduced-motion) */
 @media (prefers-reduced-motion: no-preference) {
   .sp-islands path { opacity: 0; animation: spRise 1.1s ease both; }
@@ -1600,6 +1620,7 @@ load();
     <div class="sp-rule"></div>
     <div class="sp-mark">canarias convive</div>
     <div class="sp-tag">Gobierno de Canarias + ULL</div>
+    <div class="sp-loading">Llevándote al mapa de agentes</div>
   </div>
 </div>
 <script>
