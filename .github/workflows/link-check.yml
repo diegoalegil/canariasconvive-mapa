@@ -36,25 +36,40 @@ jobs:
                   if u.startswith(('http://', 'https://')):
                       urls.setdefault(u, []).append(p['name'])
 
+          # User-Agent de navegador real: muchas WAF de ONG cortan la conexión
+          # a clientes que parecen bots, devolviendo URLError (falso "muerto").
+          UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+          HEADERS = {
+              'User-Agent': UA,
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'es-ES,es;q=0.9',
+          }
+
+          def _try(u, method):
+              req = urllib.request.Request(u, method=method, headers=HEADERS)
+              with urllib.request.urlopen(req, timeout=18, context=ctx) as r:
+                  return r.status
+
           def check(u):
+              last_err = None
               for method in ('HEAD', 'GET'):
-                  try:
-                      req = urllib.request.Request(u, method=method, headers={
-                          'User-Agent': 'Mozilla/5.0 (link-audit; +github.com/diegoalegil/canariasconvive-mapa)'
-                      })
-                      with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
-                          return u, r.status, None
-                  except urllib.error.HTTPError as e:
-                      if e.code in (403, 405) and method == 'HEAD':
+                  # GET se reintenta una vez: los servidores lentos de ONG dan
+                  # timeout intermitente desde la IP de los runners.
+                  for _ in range(2 if method == 'GET' else 1):
+                      try:
+                          return u, _try(u, method), None
+                      except urllib.error.HTTPError as e:
+                          if e.code in (403, 405) and method == 'HEAD':
+                              break  # reintenta con GET
+                          return u, e.code, None
+                      except (socket.timeout, urllib.error.URLError, ConnectionResetError, OSError) as e:
+                          last_err = type(e).__name__
+                          continue  # reintenta (GET) o pasa a GET (HEAD)
+                      except Exception as e:
+                          last_err = type(e).__name__
                           continue
-                      return u, e.code, None
-                  except (socket.timeout, urllib.error.URLError, ConnectionResetError, OSError) as e:
-                      if method == 'HEAD':
-                          continue
-                      return u, None, type(e).__name__
-                  except Exception as e:
-                      return u, None, type(e).__name__
-              return u, None, 'unreachable'
+              return u, None, last_err or 'unreachable'
 
           results = []
           with ThreadPoolExecutor(max_workers=20) as pool:
@@ -75,7 +90,12 @@ jobs:
                   soft.append((u, code, err))
               elif any(h in u for h in ANTIBOT_HOSTS + GEO_BLOCKED_HOSTS):
                   soft.append((u, code, err))
+              elif code is None:
+                  # Sin código HTTP = no se pudo conectar (timeout/RST/DNS desde
+                  # el runner). Es bloqueo/transitorio, no un enlace muerto: soft.
+                  soft.append((u, code, err))
               else:
+                  # Solo quedan HTTP 4xx reales (404/410…): página caída de verdad.
                   hard.append((u, code, err))
 
           # Construye el reporte tanto para stdout (visible en logs) como para
