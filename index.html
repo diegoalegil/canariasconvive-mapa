@@ -4,14 +4,17 @@
 <meta charset="UTF-8" />
 <title>Canarias Convive — Mapa de agentes</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@600&display=swap" rel="stylesheet"/>
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.css" rel="stylesheet"
       integrity="sha384-EP/H7vnAWQ5LW9GnEKFrWdLNFs5Ar50IJgtlPCBzA/mZRKZrR+/rMG5kXl5QNyCp"
       crossorigin="anonymous" />
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.js"
         integrity="sha384-5kuWTSgWp7o0q4Mw8nndFaZqiHFMR1ypa8Xlv3Ef0eXMKYdWPwa5+335eGOMhx+r"
         crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@turf/turf@7.3.5/turf.min.js"
-        integrity="sha384-BQF91ViEyKh73QVOKMd0MfkJ7bWbu+o0g448Qfb7aP3HVPItiy/4UZ7OuTCUDKNi"
+<script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"
+        integrity="sha384-HkQmq7PC2BUVUkCsRUnOyzpliMb5M4pVPnjEiyI92tdS8buRHN6ZnehP1n1Acj84"
         crossorigin="anonymous"></script>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
@@ -19,7 +22,7 @@
 <body>
 <div id="container">
   <aside id="sidebar">
-    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel" aria-expanded="false"></button>
+    <button type="button" class="drag-handle" id="drag-handle" aria-label="Mostrar u ocultar panel" aria-expanded="false"><span class="drag-handle-hint">Entidades y filtros</span></button>
     <header class="sidebar-header">
       <h1>Canarias Convive</h1>
       <p>Mapa de agentes</p>
@@ -45,6 +48,7 @@
     <div class="view-detail" id="view-detail"></div>
   </aside>
   <div id="map"></div>
+  <a class="back-to-site" href="https://canariasconvive.com/mapa-de-agentes/" target="_top">← Volver a Canarias Convive</a>
   <div id="map-banner" class="map-banner" hidden></div>
 </div>
 
@@ -141,47 +145,51 @@ function attachLogoFallbacks(container) {
   });
 }
 
-function hashId(id) {
-  let h = 0;
-  const s = id || '';
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) - h) + s.charCodeAt(i);
-    h |= 0;
-  }
-  return Math.abs(h);
-}
-
-function buildingFeature(f) {
-  const [lng, lat] = f.geometry.coordinates;
-  const sector = f.properties.sector;
-  const color = SECTOR_COLORS[sector] || '#999';
-  const h = hashId(f.properties.id);
-  const widthM = 26 + (h % 16);
-  const lengthM = 36 + ((h >> 4) % 24);
-  const rotation = (h >> 8) % 90;
-  const height = 45 + ((h >> 12) % 60);
-  const widthDeg = widthM / (111000 * Math.cos(lat * Math.PI / 180));
-  const lengthDeg = lengthM / 111000;
-  const rect = turf.bboxPolygon([
-    lng - widthDeg / 2, lat - lengthDeg / 2,
-    lng + widthDeg / 2, lat + lengthDeg / 2
-  ]);
-  const rotated = turf.transformRotate(rect, rotation, { pivot: [lng, lat] });
-  rotated.properties = {
-    id: f.properties.id,
-    sector,
-    color,
-    height
-  };
-  return rotated;
-}
-
 let GEOJSON = null;
 let map = null;
 let searchQuery = '';
 let currentMode = '2d';
-let zonesData = null;
 const seenMapErrors = new Set();
+
+// === CLUSTERING (supercluster) ===
+// El clustering nativo de Mapbox dibuja cada cluster en el centroide de sus
+// miembros: con entidades costeras ese centroide cae a menudo EN EL MAR.
+// Gestionamos el clustering a mano con supercluster para poder "anclar" cada
+// cluster sobre su miembro más cercano al centroide (siempre en tierra).
+const CLUSTER_RADIUS = 40;     // px, mismo valor que tenía el clustering nativo
+const CLUSTER_MAX_ZOOM = 16;   // a partir de aquí, todo desagrupado
+let clusterIndex = null;
+
+function rebuildClusterIndex(features) {
+  clusterIndex = new Supercluster({
+    radius: CLUSTER_RADIUS,
+    maxZoom: CLUSTER_MAX_ZOOM,
+    minPoints: 2
+  });
+  clusterIndex.load(features);
+}
+
+// Recalcula los clusters para el zoom actual y los vuelca en la fuente.
+// Los clusters de supercluster traen point_count/point_count_abbreviated,
+// así que las capas (clusters, cluster-count, unclustered-point) no cambian.
+function updateClusters() {
+  if (!map || !clusterIndex || !map.getSource('entities')) return;
+  const zoom = Math.floor(map.getZoom());
+  const features = clusterIndex.getClusters([-180, -85, 180, 85], zoom);
+  features.forEach(c => {
+    if (!c.properties.cluster) return;
+    // Ancla el cluster en tierra: miembro más cercano al centroide.
+    const [clng, clat] = c.geometry.coordinates;
+    let best = null, bestD = Infinity;
+    clusterIndex.getLeaves(c.properties.cluster_id, Infinity).forEach(l => {
+      const [lng, lat] = l.geometry.coordinates;
+      const d = (lng - clng) * (lng - clng) + (lat - clat) * (lat - clat);
+      if (d < bestD) { bestD = d; best = l; }
+    });
+    if (best) c.geometry = { type: 'Point', coordinates: best.geometry.coordinates.slice() };
+  });
+  map.getSource('entities').setData({ type: 'FeatureCollection', features });
+}
 
 // === FILTROS DINÁMICOS ===
 // Los filtros se generan a partir de las columnas del Sheet (props._filters).
@@ -272,15 +280,18 @@ function setSelectedEntity(id) {
 // y como maxBounds del mapa para evitar que el usuario acabe en África.
 const CANARIAS_NAV_BOUNDS = [[-19.5, 26.5], [-12.3, 30.5]];
 
-// Valida que una geometría tenga coordenadas numéricas finitas dentro de los
-// rangos válidos de lat/lng. Rechaza null/string/Infinity/NaN/fuera de rango.
+// Valida que una geometría tenga coordenadas numéricas finitas dentro del
+// archipiélago. Rechaza null/string/Infinity/NaN y puntos fuera de Canarias:
+// una coordenada en Madrid o en mitad del Atlántico es un error de datos, y
+// además quedaría fuera del área navegable (maxBounds), inaccesible.
 function hasValidCoords(f) {
   const c = f && f.geometry && f.geometry.coordinates;
   if (!Array.isArray(c) || c.length !== 2) return false;
   const [lng, lat] = c;
   if (typeof lng !== 'number' || typeof lat !== 'number') return false;
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
-  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) return false;
+  const [[w, s], [e, n]] = CANARIAS_NAV_BOUNDS;
+  if (lng < w || lng > e || lat < s || lat > n) return false;
   return true;
 }
 
@@ -346,11 +357,6 @@ async function load() {
     let s = (f.properties.sector || '').trim();
     f.properties.sector = s || 'Sin sector';
   });
-
-  zonesData = {
-    type: 'FeatureCollection',
-    features: GEOJSON.features.map(f => buildingFeature(f))
-  };
 
   initSidebar();
   applyFilter();
@@ -423,10 +429,18 @@ function initSidebar() {
   });
 
   const dragHandle = document.getElementById('drag-handle');
-  if (dragHandle) {
-    dragHandle.addEventListener('click', () => {
-      const expanded = document.getElementById('sidebar').classList.toggle('expanded');
-      dragHandle.setAttribute('aria-expanded', String(expanded));
+  const toggleSheet = () => {
+    const expanded = document.getElementById('sidebar').classList.toggle('expanded');
+    if (dragHandle) dragHandle.setAttribute('aria-expanded', String(expanded));
+  };
+  if (dragHandle) dragHandle.addEventListener('click', toggleSheet);
+  // En móvil, tocar la cabecera (título) también despliega/repliega el panel:
+  // así el área para abrirlo es mucho mayor y se descubre antes. En PC no hace
+  // nada porque la clase .expanded solo tiene efecto dentro del @media móvil.
+  const sidebarHeaderEl = document.querySelector('.sidebar-header');
+  if (sidebarHeaderEl) {
+    sidebarHeaderEl.addEventListener('click', () => {
+      if (window.innerWidth <= 768) toggleSheet();
     });
   }
 
@@ -438,7 +452,6 @@ function initSidebar() {
     btn2.classList.add('active'); btn2.setAttribute('aria-pressed', 'true');
     btn3.classList.remove('active'); btn3.setAttribute('aria-pressed', 'false');
     currentMode = '2d';
-    setTowersVisible(false);
     if (map) map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
   });
 
@@ -518,16 +531,39 @@ function clearAllFilters() {
   syncFilterStateToUrl();
 }
 
+// Campos secundarios de búsqueda (todos menos el nombre, que se pondera aparte).
+// Fuente ÚNICA, compartida por matchesSearch y searchScore: así el filtro y el
+// orden no pueden descuadrarse si algún día se añade o quita un campo.
+// No incluye typology porque su texto contiene ejemplos hardcoded ("Cáritas, Cruz Roja...")
+// que generan falsos positivos masivos. Para filtrar por tipología, usar el panel de filtros explícito.
+function searchFields(props) {
+  return [props.municipality, props.province, props.address, props.sector, props.protagonist];
+}
+
 function matchesSearch(props) {
   if (!searchQuery) return true;
-  // Búsqueda solo en campos de identidad: nombre, ubicación, sector, protagonista.
-  // No incluye typology porque su texto contiene ejemplos hardcoded ("Cáritas, Cruz Roja...")
-  // que generan falsos positivos masivos. Para filtrar por tipología, usar el panel de filtros explícito.
-  const fields = [
-    props.name, props.municipality, props.province, props.address,
-    props.sector, props.protagonist
-  ].map(normalize);
+  // Búsqueda en campos de identidad: nombre + campos secundarios (ubicación, sector, protagonista).
+  const fields = [props.name, ...searchFields(props)].map(normalize);
   return fields.some(f => f.includes(searchQuery));
+}
+
+// Puntuación de relevancia para ORDENAR los resultados de búsqueda. NO cambia
+// qué entidades pasan el filtro (eso lo decide matchesSearch); solo influye en
+// el orden de la lista. Mayor puntuación = más arriba. Una coincidencia en el
+// nombre pesa mucho más que en otros campos (ubicación, sector, etc.).
+function searchScore(props) {
+  const q = searchQuery;
+  if (!q) return 0;
+  const name = normalize(props.name);
+  let score = 0;
+  if (name === q) score += 1000;              // nombre idéntico a la búsqueda
+  else if (name.startsWith(q)) score += 500;  // el nombre empieza por la búsqueda
+  else if (name.includes(q)) score += 200;    // la búsqueda aparece en el nombre
+  // Resto de campos: mucho menos peso (evita que una coincidencia en la
+  // dirección/municipio adelante a una coincidencia real en el nombre).
+  const otros = searchFields(props).map(normalize);
+  if (otros.some(f => f.includes(q))) score += 10;
+  return score;
 }
 
 // Una feature pasa si, para cada dimensión con selección activa, su valor en
@@ -573,19 +609,8 @@ function updateFacetedCounts() {
 
 function applyFilter() {
   const filtered = getFilteredFeatures();
-  if (map && map.getSource('entities')) {
-    map.getSource('entities').setData({
-      type: 'FeatureCollection',
-      features: filtered
-    });
-    if (map.getSource('zones')) {
-      const filteredIds = new Set(filtered.map(f => f.properties.id));
-      map.getSource('zones').setData({
-        type: 'FeatureCollection',
-        features: zonesData.features.filter(z => filteredIds.has(z.properties.id))
-      });
-    }
-  }
+  rebuildClusterIndex(filtered);
+  updateClusters();
   document.getElementById('results-count').textContent = filtered.length;
   renderEntityList(filtered);
   updateFacetedCounts();
@@ -601,7 +626,17 @@ function renderEntityList(features) {
     return;
   }
   const frag = document.createDocumentFragment();
-  const sorted = features.slice().sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'es'));
+  // Con búsqueda activa, ordena por relevancia (puntuación) y desempata por
+  // nombre. Sin búsqueda, mantiene el orden alfabético de siempre.
+  // La puntuación se calcula UNA vez por entidad (no en cada comparación del
+  // sort): decora → ordena → recupera la feature.
+  const sorted = features
+    .map(f => ({ f, score: searchQuery ? searchScore(f.properties) : 0 }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.f.properties.name.localeCompare(b.f.properties.name, 'es');
+    })
+    .map(d => d.f);
   sorted.slice(0, 120).forEach(f => {
     const p = f.properties;
     const color = SECTOR_COLORS[p.sector] || '#999';
@@ -644,7 +679,36 @@ function flyToFeature(f) {
   const coords = f.geometry.coordinates;
   const pitchKeep = currentMode === '3d' ? 65 : 0;
   const bearingKeep = currentMode === '3d' ? -17 : 0;
-  map.flyTo({ center: coords, zoom: 16, pitch: pitchKeep, bearing: bearingKeep, duration: 1500 });
+  // Zoom 17 > CLUSTER_MAX_ZOOM: garantiza que la entidad llega desagrupada
+  // y su halo de selección es visible.
+  map.flyTo({ center: coords, zoom: 17, pitch: pitchKeep, bearing: bearingKeep, duration: 1500 });
+}
+
+// Popup con la lista de entidades de un punto/cluster co-ubicado. Cada fila
+// abre su ficha. Se usa al pulsar un cluster inseparable o un montón apilado.
+let entityListPopup = null;
+function showEntityListPopup(features, lngLat) {
+  const items = features.map(f => {
+    const p = f.properties;
+    const color = SECTOR_COLORS[p.sector] || '#999';
+    return `<button type="button" class="popup-entity" data-id="${escapeHTML(p.id)}">` +
+           `<span class="pe-dot" style="background:${color}"></span>` +
+           `<span>${escapeHTML(p.name)}</span></button>`;
+  }).join('');
+  const html = `<h3>${features.length} entidades en este punto</h3>` +
+               `<div class="popup-entity-list">${items}</div>`;
+  if (entityListPopup) entityListPopup.remove();
+  entityListPopup = new mapboxgl.Popup({ maxWidth: '320px', offset: 12 })
+    .setLngLat(lngLat).setHTML(html).addTo(map);
+  entityListPopup.getElement().querySelectorAll('.popup-entity').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const full = GEOJSON.features.find(f => f.properties.id === btn.dataset.id);
+      if (!full) return;
+      entityListPopup.remove();
+      flyToFeature(full);
+      showDetail(full);
+    });
+  });
 }
 
 function formatMapError(err, event) {
@@ -842,18 +906,10 @@ function setView(mode) {
   btn3.setAttribute('aria-pressed', String(mode === '3d'));
   if (!map) return;
   if (mode === '3d') {
-    setTowersVisible(true);
     map.easeTo({ pitch: 65, bearing: -17, duration: 1200 });
   } else {
-    setTowersVisible(false);
     map.easeTo({ pitch: 0, bearing: 0, duration: 1000 });
   }
-}
-
-function setTowersVisible(visible) {
-  if (!map) return;
-  const vis = visible ? 'visible' : 'none';
-  if (map.getLayer('zones')) map.setLayoutProperty('zones', 'visibility', vis);
 }
 
 function initMap() {
@@ -883,8 +939,8 @@ function initMap() {
   map.on('load', () => {
     // El estilo importa Mapbox Standard, que pide sources internas como
     // `mapbox-3d-events` y `3dbuildings`. En el plan free pueden dar 403
-    // y ensucian la consola. Como ya pintamos nuestros propios edificios
-    // sector-coloreados con el layer `zones`, los nativos son redundantes.
+    // y ensucian la consola; además los edificios 3D nativos no aportan
+    // a un mapa de marcadores. Se desactivan.
     try {
       map.setConfigProperty('basemap', 'show3dObjects', false);
     } catch (e) { /* import config may not estar disponible en estilos antiguos */ }
@@ -904,7 +960,9 @@ function initMap() {
       tileSize: 512,
       maxzoom: 14
     });
-    map.setTerrain({ source: 'mapbox-dem', exaggeration: 2.5 });
+    // Exageración contenida: con 2.5 el relieve quedaba espectacular pero los
+    // marcadores (pegados al terreno) se desplazaban mucho al inclinar la cámara.
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
 
     try {
       map.setLight({
@@ -915,28 +973,11 @@ function initMap() {
       });
     } catch (e) { /* light may be locked by style */ }
 
+    // Sin cluster:true — el clustering lo hace supercluster en updateClusters()
+    // para poder anclar cada cluster en tierra (ver comentario arriba).
     map.addSource('entities', {
       type: 'geojson',
-      data: GEOJSON,
-      cluster: true,
-      clusterRadius: 40,
-      clusterMaxZoom: 13
-    });
-
-    map.addSource('zones', { type: 'geojson', data: zonesData });
-
-    map.addLayer({
-      id: 'zones',
-      type: 'fill-extrusion',
-      source: 'zones',
-      layout: { visibility: 'none' },
-      paint: {
-        'fill-extrusion-color': ['get', 'color'],
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 11, 0.55],
-        'fill-extrusion-vertical-gradient': true
-      }
+      data: { type: 'FeatureCollection', features: [] }
     });
 
     map.addLayer({
@@ -1014,20 +1055,42 @@ function initMap() {
 
     map.on('click', 'clusters', (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
-      if (!features.length) return;
+      if (!features.length || !clusterIndex) return;
       const feat = features[0];
-      // Mapbox GL JS v3 sigue siendo callback-based aquí: el método devuelve
-      // `this` (la source) para chaining y entrega el zoom asíncronamente por
-      // el callback. Hacer await sobre el retorno daba GeoJSONSource ⇒ easeTo
-      // recibía zoom no finito y el cluster nunca expandía.
-      map.getSource('entities').getClusterExpansionZoom(feat.properties.cluster_id, (err, zoom) => {
-        if (err) { console.warn('Cluster expansion failed:', err); return; }
-        map.easeTo({ center: feat.geometry.coordinates, zoom });
-      });
+      const center = feat.geometry.coordinates;
+      let expansion;
+      try {
+        expansion = clusterIndex.getClusterExpansionZoom(feat.properties.cluster_id);
+      } catch (err) {
+        console.warn('Cluster expansion failed:', err);
+        return;
+      }
+      // Si el cluster no se separa ni al zoom máximo de clustering, son
+      // entidades (casi) co-ubicadas: en vez de un zoom infinito que nunca
+      // las separa, mostramos la lista para elegir.
+      if (expansion > CLUSTER_MAX_ZOOM) {
+        showEntityListPopup(clusterIndex.getLeaves(feat.properties.cluster_id, Infinity), center);
+      } else {
+        map.easeTo({ center, zoom: Math.min(expansion + 0.5, 18) });
+      }
     });
 
     map.on('click', 'unclustered-point', (e) => {
-      const clicked = e.features[0];
+      // queryRenderedFeatures devuelve TODAS las features bajo el cursor: si
+      // hay varias entidades apiladas en el mismo punto, se elige de una lista
+      // (antes solo la de arriba era clicable).
+      const seen = new Set();
+      const stacked = (e.features || []).filter(f => {
+        if (seen.has(f.properties.id)) return false;
+        seen.add(f.properties.id);
+        return true;
+      });
+      if (stacked.length > 1) {
+        showEntityListPopup(stacked, stacked[0].geometry.coordinates);
+        return;
+      }
+      const clicked = stacked[0];
+      if (!clicked) return;
       const full = GEOJSON.features.find(f => f.properties.id === clicked.properties.id) || clicked;
       flyToFeature(full);
       showDetail(full);
@@ -1038,13 +1101,108 @@ function initMap() {
       map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
     });
 
+    // El clustering manual depende del zoom: recalcular al terminar cada zoom.
+    map.on('zoomend', updateClusters);
+
     applyFilter();
     // Si la URL trajo islas filtradas, vuela a ellas al cargar el mapa.
     if (activeFilters[FLYTO_DIM] && activeFilters[FLYTO_DIM].size > 0) flyToIslands(activeFilters[FLYTO_DIM]);
+
+    // Oculta el splash screen: el mapa ya está listo (estilo + datos cargados).
+    document.dispatchEvent(new Event('mapbox-ready'));
   });
 }
 
 load();
+</script>
+
+<!-- ─── Splash screen (Logo Mapa Canarias Convive) ───────────────────────────── -->
+<div id="splash" role="status" aria-label="Cargando el mapa…">
+  <div id="splash-frame">
+    <div class="sp-kick">Mapa de Agentes</div>
+    <div class="sp-kickrule"></div>
+    <div class="sp-map">
+      <svg class="sp-islands" viewBox="0 0 700 700" aria-hidden="true">
+        <defs>
+          <filter id="spIslandShadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-opacity="0.10"/>
+          </filter>
+        </defs>
+        <g filter="url(#spIslandShadow)">
+        <path d="M 126.9 320.9 L 126.3 321.0 L 125.1 323.7 L 123.9 324.9 L 122.8 328.5 L 121.7 329.8 L 121.5 331.2 L 120.2 331.9 L 119.9 331.4 L 118.0 330.7 L 117.9 330.0 L 117.0 329.6 L 116.0 327.3 L 116.4 326.7 L 115.2 324.9 L 115.5 324.6 L 115.0 322.8 L 115.4 322.5 L 115.4 322.0 L 115.1 321.8 L 115.4 321.6 L 115.4 320.5 L 114.6 319.7 L 115.0 319.7 L 114.9 318.8 L 114.0 315.9 L 113.0 315.1 L 111.8 312.1 L 110.7 311.4 L 110.1 309.6 L 108.0 308.2 L 107.9 307.4 L 108.2 307.3 L 108.3 305.9 L 106.2 301.7 L 106.0 300.6 L 105.6 300.4 L 105.3 299.6 L 105.5 300.1 L 105.1 300.9 L 104.9 298.9 L 104.5 299.0 L 103.2 296.7 L 102.3 296.0 L 102.5 294.8 L 101.8 293.8 L 102.2 293.5 L 101.8 292.3 L 101.5 292.2 L 101.7 291.8 L 101.2 291.3 L 101.4 290.8 L 100.8 290.0 L 100.9 289.0 L 99.9 287.7 L 99.7 285.9 L 98.6 285.1 L 98.4 284.1 L 97.0 282.8 L 96.9 282.0 L 96.4 281.8 L 96.0 281.0 L 96.5 280.2 L 96.1 279.0 L 96.2 276.6 L 97.3 276.1 L 97.8 274.7 L 98.8 274.7 L 99.0 274.2 L 99.8 273.8 L 100.4 272.6 L 100.1 272.0 L 100.8 272.1 L 101.4 271.4 L 101.4 270.7 L 101.9 270.4 L 101.8 269.4 L 102.5 269.6 L 103.6 268.9 L 104.4 268.1 L 104.6 267.3 L 105.0 267.3 L 104.9 266.9 L 106.0 267.2 L 107.8 266.3 L 108.3 265.7 L 108.0 265.2 L 108.8 264.4 L 109.3 265.1 L 109.6 264.4 L 110.1 264.4 L 110.3 264.9 L 110.7 264.7 L 110.9 265.3 L 111.2 265.3 L 111.0 266.0 L 112.3 267.0 L 113.4 267.4 L 113.8 267.2 L 113.9 266.8 L 114.2 267.6 L 116.3 268.1 L 117.3 268.0 L 117.2 268.3 L 117.9 268.5 L 120.0 267.9 L 120.9 268.2 L 123.2 267.3 L 124.3 267.5 L 125.1 267.0 L 125.1 266.5 L 126.0 267.0 L 126.4 266.7 L 127.0 267.2 L 128.0 266.7 L 128.2 267.3 L 129.7 267.3 L 129.8 268.6 L 130.3 268.7 L 130.1 269.8 L 130.9 269.9 L 130.7 270.9 L 131.4 271.5 L 131.5 272.1 L 131.9 272.1 L 132.0 273.1 L 132.4 273.3 L 132.5 276.1 L 133.0 276.3 L 132.8 276.5 L 133.4 277.1 L 133.3 278.0 L 134.5 279.4 L 135.0 280.6 L 135.3 280.9 L 135.6 280.7 L 136.2 281.3 L 136.0 281.8 L 136.5 282.3 L 136.7 283.3 L 137.4 283.5 L 137.2 285.0 L 136.2 286.5 L 136.3 287.3 L 135.4 288.2 L 134.2 288.7 L 132.3 291.2 L 132.3 293.3 L 132.2 292.9 L 131.9 293.2 L 131.9 293.7 L 131.4 294.1 L 131.7 295.5 L 131.3 294.1 L 131.0 294.5 L 130.9 295.8 L 131.3 296.6 L 132.1 297.1 L 131.8 297.3 L 132.2 297.8 L 131.9 298.2 L 132.9 299.6 L 132.6 299.9 L 132.5 300.8 L 133.1 301.1 L 133.1 302.6 L 133.7 303.3 L 133.4 304.6 L 132.7 305.4 L 133.0 306.7 L 132.7 308.3 L 133.1 308.6 L 132.5 309.3 L 132.7 309.9 L 132.1 310.5 L 132.3 312.4 L 131.3 313.2 L 130.5 314.7 L 128.3 316.7 L 126.9 320.9 Z"/>
+        <path d="M 125.3 430.7 L 124.8 431.2 L 124.4 432.0 L 124.5 432.8 L 123.6 434.1 L 123.9 438.0 L 122.8 439.5 L 122.2 439.7 L 122.6 439.5 L 122.4 439.3 L 121.8 439.6 L 122.0 439.7 L 120.9 439.6 L 120.2 439.3 L 119.8 438.3 L 118.1 437.8 L 116.7 436.0 L 116.6 434.9 L 115.4 434.2 L 115.3 432.9 L 112.2 430.6 L 109.0 429.9 L 107.1 429.9 L 105.0 429.2 L 103.8 429.3 L 101.3 428.5 L 98.2 428.8 L 96.6 427.6 L 96.0 426.6 L 96.2 424.5 L 97.1 424.5 L 97.3 424.0 L 97.3 421.5 L 96.8 421.0 L 96.8 420.5 L 97.5 419.7 L 97.3 419.3 L 98.0 419.5 L 98.4 418.9 L 98.9 419.0 L 99.0 418.4 L 99.5 418.3 L 100.2 417.5 L 101.8 417.9 L 101.9 418.7 L 102.9 419.5 L 107.5 420.6 L 109.3 420.5 L 111.4 419.6 L 114.2 419.1 L 115.4 417.7 L 116.8 416.9 L 117.4 415.6 L 119.3 414.3 L 119.9 414.3 L 121.1 413.0 L 121.6 411.1 L 120.8 409.0 L 121.3 409.2 L 122.1 408.5 L 123.7 408.2 L 124.9 406.8 L 125.0 406.2 L 125.4 406.2 L 125.8 405.8 L 127.5 406.0 L 128.0 405.2 L 129.2 404.6 L 131.7 404.7 L 132.1 405.5 L 133.2 405.5 L 133.4 405.9 L 134.0 405.7 L 133.8 406.5 L 134.4 406.6 L 134.4 407.2 L 135.1 407.4 L 135.3 408.4 L 134.9 408.7 L 136.2 409.8 L 136.7 410.8 L 136.7 412.1 L 136.4 412.6 L 135.9 412.7 L 134.9 414.8 L 134.6 415.1 L 134.3 414.9 L 134.1 416.0 L 134.1 415.1 L 133.7 415.3 L 132.9 417.1 L 132.1 417.6 L 132.8 418.5 L 130.7 421.6 L 130.2 424.1 L 128.8 424.8 L 128.0 424.3 L 127.1 424.6 L 125.9 426.1 L 125.5 428.8 L 125.7 430.2 L 125.3 430.7 Z"/>
+        <path d="M 182.0 363.1 L 183.9 364.5 L 184.9 364.3 L 185.1 365.7 L 185.9 365.8 L 186.1 366.3 L 185.6 367.3 L 186.3 368.1 L 187.2 368.5 L 186.8 369.4 L 187.1 370.8 L 187.5 370.8 L 186.8 371.4 L 187.1 371.5 L 187.0 372.6 L 187.4 372.5 L 187.4 373.5 L 187.8 373.5 L 187.9 373.9 L 186.9 374.7 L 187.0 375.0 L 186.2 376.1 L 186.6 375.0 L 185.9 375.1 L 185.6 376.4 L 184.8 377.5 L 184.2 377.8 L 183.5 377.6 L 181.6 379.0 L 181.1 379.7 L 181.0 380.8 L 179.9 380.7 L 179.6 381.5 L 178.7 381.9 L 178.7 382.4 L 177.7 382.8 L 177.7 383.9 L 177.3 383.9 L 176.8 383.3 L 176.0 383.5 L 175.2 384.9 L 173.5 385.1 L 173.2 385.9 L 171.8 385.8 L 171.1 385.3 L 170.2 385.7 L 168.9 385.4 L 166.6 386.6 L 165.2 385.6 L 162.7 385.7 L 162.3 385.3 L 162.2 383.9 L 161.1 383.4 L 159.9 383.5 L 159.6 382.0 L 157.0 381.3 L 155.9 379.9 L 155.5 380.1 L 155.6 379.4 L 155.3 379.1 L 155.6 378.3 L 155.3 377.2 L 153.7 376.1 L 153.5 376.3 L 153.8 376.5 L 153.5 376.6 L 153.8 376.9 L 153.3 376.6 L 152.6 375.5 L 152.2 374.2 L 151.2 373.4 L 151.5 372.3 L 151.4 370.2 L 152.3 368.0 L 152.1 366.5 L 151.5 366.0 L 151.5 365.2 L 151.9 364.9 L 151.6 364.5 L 153.3 362.7 L 152.9 360.9 L 153.6 360.2 L 154.2 358.4 L 155.2 357.9 L 155.0 356.9 L 155.8 355.8 L 157.1 356.1 L 158.4 355.1 L 159.3 355.4 L 160.2 354.4 L 160.4 354.8 L 160.8 354.5 L 161.0 354.7 L 161.8 353.5 L 162.3 354.2 L 162.6 353.6 L 164.1 353.5 L 164.1 354.3 L 165.3 355.0 L 165.3 355.9 L 165.8 355.8 L 166.0 356.1 L 166.3 355.8 L 166.4 356.4 L 167.8 355.9 L 168.1 356.5 L 168.7 356.1 L 169.2 356.5 L 169.7 356.2 L 170.7 356.6 L 171.3 356.2 L 172.1 357.1 L 172.8 356.4 L 173.6 356.5 L 173.5 356.9 L 173.9 356.9 L 174.1 357.7 L 175.1 358.6 L 175.4 359.8 L 176.5 360.3 L 177.7 359.7 L 178.0 360.3 L 178.2 360.1 L 178.0 360.5 L 178.1 361.2 L 179.5 361.0 L 179.3 361.7 L 179.9 362.4 L 180.1 362.2 L 180.4 362.8 L 182.0 363.1 Z"/>
+        <path d="M 292.0 329.3 L 290.6 330.9 L 288.5 332.3 L 288.5 333.8 L 288.1 335.1 L 287.3 336.1 L 287.4 337.6 L 288.8 342.0 L 288.5 344.7 L 287.2 345.5 L 285.8 347.6 L 285.8 347.3 L 285.2 347.9 L 285.3 349.2 L 284.7 351.3 L 283.6 352.4 L 283.2 353.7 L 282.5 354.7 L 282.6 355.2 L 281.8 356.1 L 281.4 358.0 L 279.2 361.3 L 279.1 361.7 L 279.7 362.3 L 279.6 363.2 L 278.8 364.0 L 279.0 365.2 L 278.4 366.4 L 279.1 367.4 L 278.8 368.0 L 278.2 367.9 L 277.8 369.2 L 278.0 370.0 L 279.0 370.1 L 278.9 370.8 L 277.8 371.9 L 277.0 371.6 L 276.5 372.6 L 276.7 372.9 L 275.6 373.0 L 275.7 373.8 L 273.6 375.3 L 273.5 376.7 L 272.2 377.3 L 272.0 378.1 L 269.6 380.4 L 269.5 380.8 L 269.7 381.3 L 269.5 381.1 L 269.4 381.8 L 269.9 382.3 L 268.6 382.3 L 268.8 383.6 L 268.3 382.5 L 267.7 382.6 L 267.2 384.1 L 266.0 384.8 L 265.9 385.5 L 265.2 385.5 L 264.7 386.8 L 263.5 387.2 L 263.2 388.4 L 262.6 388.0 L 262.1 388.4 L 261.9 389.3 L 262.4 389.9 L 261.4 391.3 L 259.7 390.2 L 258.4 390.6 L 257.6 390.2 L 254.7 390.8 L 254.2 390.5 L 252.0 391.6 L 251.5 392.3 L 251.3 392.2 L 251.9 391.7 L 250.7 392.4 L 249.7 392.3 L 248.8 393.3 L 248.7 393.9 L 247.9 393.9 L 247.9 394.4 L 247.1 394.8 L 245.9 394.0 L 245.2 394.4 L 244.0 394.0 L 243.7 394.8 L 243.0 394.6 L 242.0 395.7 L 239.7 395.5 L 237.9 394.0 L 237.7 393.3 L 238.1 391.0 L 237.4 389.9 L 237.2 387.6 L 236.1 387.1 L 236.3 387.8 L 235.3 386.7 L 234.2 386.9 L 234.4 386.8 L 234.1 386.6 L 234.0 386.9 L 233.4 386.2 L 234.0 384.5 L 233.8 384.3 L 234.0 383.3 L 233.2 382.3 L 233.3 382.0 L 233.4 382.6 L 233.6 382.1 L 233.3 381.0 L 232.9 380.4 L 231.5 380.0 L 231.1 379.0 L 230.5 378.9 L 230.7 378.6 L 230.2 378.6 L 230.3 377.9 L 229.8 377.9 L 229.9 377.4 L 229.7 377.1 L 228.6 377.1 L 228.8 376.5 L 228.1 376.6 L 227.9 375.7 L 227.3 375.5 L 227.4 375.1 L 227.1 375.2 L 226.8 374.2 L 226.5 374.3 L 226.1 373.7 L 226.1 373.0 L 225.1 372.1 L 224.3 370.4 L 224.4 369.9 L 223.5 369.1 L 223.2 367.4 L 223.5 367.0 L 223.0 366.7 L 223.2 366.3 L 222.3 365.4 L 221.9 365.4 L 222.1 365.7 L 221.3 365.3 L 220.7 363.6 L 220.1 363.1 L 220.1 362.1 L 219.3 361.7 L 218.7 360.8 L 218.8 359.1 L 218.3 358.6 L 218.5 357.8 L 217.9 357.6 L 218.0 356.5 L 217.4 355.5 L 217.9 355.3 L 217.7 354.2 L 218.3 354.0 L 218.6 352.8 L 218.2 351.4 L 216.7 350.6 L 216.8 349.9 L 215.5 349.6 L 214.9 348.2 L 215.1 347.4 L 214.5 347.0 L 214.6 346.8 L 214.0 346.2 L 213.8 345.5 L 212.4 344.9 L 212.2 344.0 L 212.4 343.4 L 210.6 341.9 L 209.8 340.7 L 210.0 340.0 L 209.5 340.0 L 208.4 338.8 L 208.0 339.0 L 207.2 338.3 L 206.6 338.3 L 206.4 338.6 L 205.9 338.3 L 206.5 338.2 L 206.0 336.4 L 206.9 335.2 L 208.4 335.0 L 208.8 334.5 L 209.9 335.0 L 210.8 334.8 L 211.0 334.4 L 211.5 334.5 L 211.7 333.9 L 212.1 334.2 L 213.6 333.6 L 213.9 332.8 L 215.3 332.8 L 215.2 332.3 L 216.0 332.0 L 217.0 330.7 L 218.0 330.9 L 218.1 330.3 L 219.3 329.9 L 220.4 330.0 L 220.4 330.9 L 220.8 330.7 L 222.9 332.7 L 223.5 332.2 L 223.8 332.6 L 224.9 332.6 L 225.3 333.2 L 226.0 332.8 L 227.2 333.2 L 228.0 333.0 L 228.8 333.6 L 229.4 332.8 L 230.8 332.9 L 231.3 333.6 L 232.5 332.8 L 232.8 332.1 L 233.6 332.1 L 233.8 331.7 L 234.2 331.8 L 234.3 332.6 L 235.2 332.6 L 235.0 332.1 L 235.5 331.9 L 235.2 331.5 L 235.9 331.4 L 235.9 330.8 L 236.9 331.4 L 238.7 331.4 L 239.6 330.9 L 239.7 329.4 L 239.8 330.0 L 241.6 330.3 L 242.4 329.7 L 242.1 329.2 L 242.4 328.9 L 242.7 329.0 L 242.6 328.4 L 243.1 328.9 L 243.6 328.5 L 244.5 328.9 L 245.0 328.5 L 245.7 329.4 L 247.0 329.0 L 248.0 329.7 L 249.5 329.3 L 252.4 329.8 L 253.2 329.6 L 253.9 328.7 L 254.5 329.1 L 255.2 329.0 L 256.7 327.9 L 257.5 328.0 L 258.5 326.6 L 259.0 326.8 L 260.1 325.6 L 260.8 325.4 L 260.7 325.8 L 261.2 325.8 L 261.8 325.2 L 262.4 325.3 L 262.1 325.4 L 262.2 325.9 L 263.3 326.0 L 266.5 325.4 L 267.7 324.6 L 267.8 323.9 L 268.4 323.4 L 268.6 322.3 L 269.1 321.9 L 270.0 322.5 L 270.8 321.9 L 271.6 321.9 L 271.8 321.1 L 272.5 320.6 L 271.9 319.9 L 272.0 319.5 L 272.9 319.5 L 273.1 318.7 L 274.0 319.1 L 274.6 318.7 L 274.5 317.3 L 275.6 316.4 L 275.3 315.8 L 276.2 316.3 L 276.5 316.0 L 276.3 315.4 L 277.2 315.1 L 278.6 313.8 L 279.0 312.7 L 278.9 312.1 L 279.2 312.0 L 278.9 311.6 L 279.4 311.2 L 279.9 310.0 L 279.6 309.1 L 281.0 308.0 L 281.2 307.5 L 282.3 306.9 L 282.5 306.4 L 283.0 306.4 L 283.1 305.6 L 284.8 304.7 L 284.9 304.3 L 287.2 304.1 L 287.9 304.5 L 288.7 303.8 L 289.0 304.0 L 289.5 303.8 L 289.5 303.2 L 292.5 302.5 L 292.8 301.1 L 292.5 300.2 L 293.2 299.6 L 293.1 299.2 L 294.1 298.8 L 294.8 299.0 L 295.1 300.2 L 295.9 300.1 L 296.4 299.7 L 297.0 300.2 L 298.0 300.5 L 298.5 300.1 L 299.2 300.2 L 299.6 299.3 L 300.7 300.2 L 301.5 299.7 L 301.5 299.0 L 302.3 299.7 L 303.1 299.8 L 303.8 300.5 L 305.8 300.1 L 307.2 300.9 L 308.7 301.1 L 311.2 300.6 L 312.0 299.9 L 313.1 300.0 L 315.8 298.4 L 316.1 297.8 L 316.8 298.0 L 318.3 297.3 L 322.0 298.5 L 321.7 298.9 L 321.8 299.7 L 322.2 299.6 L 322.9 300.2 L 322.9 301.4 L 323.8 302.2 L 323.9 303.1 L 322.8 304.3 L 322.8 305.2 L 322.5 306.0 L 323.0 306.7 L 322.0 306.2 L 321.0 306.9 L 321.1 307.5 L 320.5 307.9 L 320.4 308.5 L 319.2 308.2 L 317.0 309.0 L 315.0 310.7 L 314.8 310.4 L 314.1 310.7 L 313.9 311.3 L 312.8 312.1 L 312.8 312.6 L 311.4 312.7 L 310.5 313.2 L 311.7 312.2 L 310.1 313.1 L 310.2 313.4 L 309.7 313.4 L 308.4 314.8 L 308.0 314.9 L 309.2 313.8 L 308.2 313.9 L 307.8 314.6 L 306.7 314.5 L 305.4 316.9 L 305.8 317.2 L 306.9 315.5 L 305.9 317.1 L 306.0 317.7 L 305.2 319.4 L 305.9 317.7 L 305.5 317.4 L 305.8 317.9 L 305.2 318.1 L 304.9 319.6 L 304.4 319.4 L 304.2 320.3 L 303.3 320.1 L 301.9 320.8 L 300.4 323.0 L 298.7 324.3 L 298.4 325.3 L 297.4 326.3 L 295.1 327.8 L 294.5 328.7 L 293.0 328.4 L 292.0 329.3 Z"/>
+        <path d="M 408.4 396.9 L 407.8 397.7 L 407.5 401.8 L 406.5 403.6 L 407.1 405.4 L 407.7 405.7 L 407.7 406.0 L 408.4 406.0 L 408.1 406.8 L 407.6 406.9 L 407.5 407.6 L 408.0 408.0 L 407.6 408.5 L 407.8 409.1 L 407.1 409.5 L 405.8 409.3 L 405.1 410.4 L 406.1 411.1 L 405.7 411.6 L 406.0 411.2 L 405.0 410.6 L 403.5 410.9 L 402.9 412.0 L 403.0 412.9 L 402.3 413.6 L 402.5 414.4 L 402.2 414.9 L 402.6 415.8 L 402.3 416.9 L 400.7 418.2 L 400.8 418.7 L 400.6 418.3 L 400.7 418.7 L 400.4 418.4 L 397.2 419.0 L 396.4 419.2 L 396.4 419.6 L 396.2 419.2 L 394.8 419.8 L 392.8 419.9 L 391.6 420.4 L 389.7 422.0 L 388.1 421.9 L 386.0 423.6 L 385.3 423.6 L 384.4 424.2 L 383.7 424.1 L 383.5 424.5 L 381.6 425.3 L 380.6 429.1 L 376.5 429.6 L 373.4 427.2 L 372.6 427.5 L 373.2 427.8 L 372.1 427.8 L 370.8 426.9 L 369.4 426.8 L 367.9 426.0 L 366.0 426.3 L 365.6 427.1 L 366.2 427.3 L 365.4 427.1 L 364.7 426.0 L 363.7 426.0 L 363.6 425.6 L 363.9 426.0 L 364.2 425.4 L 363.5 424.7 L 363.1 423.5 L 362.3 423.2 L 361.8 423.5 L 362.2 423.7 L 361.6 423.6 L 361.1 422.5 L 360.0 421.8 L 360.3 421.6 L 359.8 421.6 L 360.0 422.0 L 359.8 421.3 L 359.4 421.6 L 357.9 420.6 L 358.1 420.4 L 357.8 420.4 L 357.4 419.9 L 357.6 419.5 L 357.1 418.9 L 356.0 418.9 L 355.0 417.5 L 354.3 417.4 L 353.8 416.2 L 352.2 415.6 L 352.3 416.0 L 351.8 415.9 L 352.3 416.1 L 351.8 416.0 L 350.1 413.7 L 348.8 413.0 L 348.2 411.7 L 348.3 411.1 L 347.2 409.8 L 347.2 409.1 L 345.2 405.5 L 344.4 403.2 L 342.1 400.4 L 341.9 398.7 L 342.7 396.8 L 342.9 394.2 L 342.5 392.4 L 342.0 391.8 L 342.0 390.2 L 342.1 389.5 L 343.0 388.7 L 343.0 387.7 L 343.6 387.4 L 343.8 385.6 L 344.4 384.5 L 343.6 383.0 L 344.9 382.4 L 346.2 382.8 L 347.2 382.5 L 349.0 381.8 L 351.7 379.2 L 352.0 377.6 L 353.3 377.6 L 356.1 376.2 L 356.6 374.6 L 357.2 374.6 L 358.7 373.6 L 360.0 371.5 L 360.6 369.9 L 360.4 368.7 L 359.9 368.4 L 360.0 369.0 L 359.7 368.5 L 360.0 367.5 L 360.8 367.3 L 360.9 366.3 L 360.5 365.9 L 361.0 365.7 L 360.3 365.1 L 360.9 364.5 L 361.0 363.5 L 361.8 363.2 L 361.6 361.9 L 361.0 361.6 L 361.6 360.7 L 362.1 360.7 L 362.2 360.1 L 360.7 359.1 L 360.2 358.2 L 360.4 357.7 L 361.8 358.2 L 362.6 357.8 L 363.1 356.9 L 363.4 357.2 L 364.1 356.9 L 364.5 357.6 L 364.4 358.3 L 364.7 358.1 L 365.1 358.8 L 365.4 358.3 L 365.6 358.8 L 366.5 359.0 L 368.4 357.7 L 369.2 357.9 L 370.1 357.5 L 370.8 356.6 L 371.3 357.3 L 371.7 357.0 L 372.1 357.4 L 372.8 358.2 L 372.6 358.6 L 373.2 359.7 L 373.8 359.6 L 374.3 360.7 L 375.2 360.5 L 376.5 361.3 L 378.1 360.8 L 379.9 361.4 L 380.2 361.0 L 380.6 361.3 L 382.2 360.8 L 384.2 361.0 L 385.2 360.4 L 385.2 360.0 L 385.8 360.3 L 386.2 359.6 L 387.0 359.5 L 387.8 359.8 L 387.6 360.1 L 388.7 360.7 L 388.7 361.1 L 389.1 360.6 L 390.6 361.1 L 390.8 361.6 L 391.6 361.1 L 391.5 361.5 L 392.6 361.8 L 393.1 362.8 L 394.0 362.5 L 395.7 364.3 L 396.6 363.9 L 397.7 364.0 L 400.1 362.4 L 401.0 361.1 L 400.7 360.6 L 401.0 360.1 L 400.8 359.1 L 399.4 358.3 L 399.5 357.7 L 399.8 357.1 L 401.2 356.6 L 401.4 356.0 L 401.9 356.0 L 402.4 355.1 L 402.8 355.1 L 403.4 355.8 L 403.6 355.4 L 404.6 355.6 L 405.1 356.5 L 404.8 357.6 L 405.8 357.8 L 405.9 358.4 L 405.7 360.0 L 405.8 358.5 L 404.9 358.3 L 404.8 359.6 L 405.1 359.7 L 404.6 360.3 L 404.6 363.2 L 405.0 363.5 L 404.9 365.1 L 404.9 363.5 L 404.5 363.2 L 404.5 362.5 L 404.6 358.9 L 404.1 360.2 L 403.3 360.7 L 403.9 361.3 L 403.9 361.9 L 403.4 361.5 L 403.4 362.1 L 403.9 362.5 L 403.9 364.0 L 403.0 363.9 L 403.1 360.9 L 402.7 360.9 L 402.5 361.7 L 402.5 360.9 L 402.2 361.4 L 402.1 360.9 L 401.9 361.5 L 401.9 360.9 L 401.6 360.9 L 401.6 361.5 L 402.6 362.5 L 401.6 361.9 L 401.4 362.6 L 401.9 362.6 L 401.9 362.2 L 402.0 362.9 L 401.6 363.2 L 402.0 363.0 L 401.5 363.2 L 401.4 363.8 L 402.2 364.0 L 401.5 364.1 L 402.0 364.7 L 402.1 364.0 L 402.1 365.0 L 402.5 365.2 L 403.5 366.9 L 404.0 368.5 L 403.8 370.2 L 403.2 371.4 L 403.7 372.7 L 403.1 373.5 L 402.7 375.2 L 403.7 376.4 L 403.3 377.3 L 403.4 377.8 L 404.3 377.9 L 404.1 378.3 L 405.2 379.4 L 407.0 380.5 L 407.5 380.4 L 407.7 382.5 L 408.9 383.7 L 409.5 383.8 L 409.0 384.2 L 409.4 384.9 L 409.3 385.7 L 410.0 385.9 L 409.9 386.4 L 410.4 386.7 L 410.2 387.2 L 410.3 386.8 L 409.4 387.3 L 408.8 388.0 L 409.1 389.4 L 408.4 389.3 L 407.9 390.8 L 408.2 391.4 L 408.5 391.1 L 408.8 391.5 L 408.3 392.4 L 409.0 393.0 L 408.4 393.4 L 408.6 394.0 L 409.8 394.7 L 410.2 394.5 L 410.1 395.4 L 411.3 395.9 L 411.7 396.8 L 411.2 397.2 L 409.5 396.0 L 408.4 396.9 Z"/>
+        <path d="M 546.6 385.7 L 546.3 386.1 L 546.0 385.8 L 545.1 386.0 L 544.3 386.9 L 543.0 386.7 L 542.0 387.9 L 541.5 387.6 L 540.7 388.2 L 536.2 388.2 L 535.1 389.3 L 532.7 390.0 L 528.2 398.0 L 526.2 399.1 L 523.3 403.2 L 521.2 404.8 L 518.1 408.9 L 516.7 409.9 L 513.6 409.0 L 512.3 409.3 L 511.8 409.0 L 512.7 409.0 L 511.1 408.2 L 509.8 408.6 L 506.6 407.5 L 505.2 407.5 L 499.0 405.0 L 495.3 404.3 L 491.6 405.2 L 490.9 406.3 L 490.5 405.8 L 491.6 404.8 L 491.7 403.9 L 493.1 403.0 L 492.8 402.1 L 493.0 401.2 L 492.0 400.3 L 492.9 399.9 L 493.2 398.8 L 493.9 399.1 L 493.9 399.7 L 494.7 400.5 L 495.7 399.7 L 497.6 400.3 L 498.4 399.6 L 499.3 400.5 L 500.6 400.4 L 508.5 398.5 L 511.3 397.4 L 512.7 396.6 L 512.8 396.0 L 513.1 396.2 L 515.9 395.1 L 520.1 392.4 L 521.5 390.6 L 523.3 389.7 L 528.2 385.7 L 529.2 384.7 L 529.8 383.6 L 532.6 381.3 L 532.6 380.7 L 533.7 379.5 L 534.1 377.7 L 533.9 375.9 L 534.7 373.9 L 534.2 373.0 L 534.7 372.1 L 534.6 371.4 L 534.2 369.4 L 533.8 369.3 L 534.3 368.8 L 534.4 367.5 L 535.0 367.0 L 534.5 365.5 L 535.3 363.7 L 535.4 362.5 L 536.1 361.6 L 537.6 361.0 L 539.2 359.5 L 539.3 358.8 L 540.1 358.0 L 540.2 356.9 L 541.5 355.8 L 541.4 352.3 L 542.5 351.4 L 542.1 350.5 L 542.6 349.7 L 542.1 349.5 L 542.1 348.6 L 543.0 347.1 L 543.3 347.0 L 543.1 345.5 L 543.8 344.8 L 543.7 344.1 L 544.6 343.5 L 544.9 342.7 L 545.2 342.8 L 546.6 341.1 L 548.8 339.7 L 550.5 338.0 L 552.1 334.8 L 552.5 332.9 L 552.6 333.2 L 553.0 332.6 L 553.2 331.7 L 554.5 329.9 L 555.2 327.6 L 555.1 327.1 L 555.9 326.7 L 555.5 325.5 L 555.6 325.1 L 556.7 324.6 L 557.0 323.1 L 558.2 321.9 L 560.4 318.4 L 560.3 317.0 L 559.6 315.5 L 559.6 314.7 L 560.6 313.0 L 560.4 312.5 L 560.9 312.2 L 560.5 311.9 L 561.4 311.4 L 561.6 309.7 L 562.5 308.8 L 562.5 308.0 L 563.9 304.7 L 563.2 303.4 L 563.6 303.2 L 563.1 302.7 L 563.5 302.2 L 562.6 301.5 L 562.8 300.8 L 562.5 299.2 L 563.2 299.3 L 562.5 298.9 L 563.2 298.4 L 562.8 298.0 L 563.3 297.7 L 563.4 298.5 L 564.5 298.6 L 564.3 298.2 L 565.6 297.1 L 565.4 296.5 L 566.9 296.5 L 567.6 295.6 L 568.1 295.9 L 567.8 295.5 L 568.6 295.4 L 568.4 294.9 L 568.7 294.6 L 569.4 295.4 L 569.8 294.7 L 570.8 294.8 L 571.3 294.3 L 571.6 294.6 L 573.8 292.8 L 574.4 294.0 L 574.9 293.1 L 574.8 292.6 L 576.2 291.8 L 577.6 293.0 L 577.8 292.4 L 578.7 292.7 L 579.8 291.7 L 580.6 291.7 L 580.8 291.1 L 581.6 291.0 L 583.1 291.7 L 583.7 292.3 L 583.9 293.3 L 584.9 292.7 L 585.2 293.5 L 585.7 293.8 L 584.9 293.7 L 584.8 294.9 L 585.5 295.4 L 586.0 295.1 L 586.9 296.0 L 588.4 296.0 L 588.5 296.9 L 589.3 298.4 L 589.1 299.2 L 590.1 301.5 L 589.6 304.7 L 590.1 306.5 L 590.2 311.3 L 590.8 313.0 L 590.7 313.7 L 591.1 314.0 L 590.9 314.5 L 591.2 315.4 L 591.0 316.0 L 590.7 315.8 L 590.6 316.6 L 591.3 318.4 L 591.1 319.0 L 590.5 319.5 L 590.2 321.3 L 590.7 322.4 L 590.2 324.0 L 590.8 324.3 L 590.9 325.0 L 590.2 325.5 L 590.0 326.3 L 589.1 326.8 L 588.9 327.6 L 589.6 328.1 L 589.5 329.7 L 588.8 330.3 L 588.8 331.2 L 588.2 331.9 L 588.3 333.2 L 587.6 333.9 L 586.6 334.0 L 586.7 335.3 L 586.5 335.4 L 586.3 334.0 L 585.8 334.5 L 586.1 335.1 L 586.0 334.7 L 585.4 334.9 L 584.6 337.2 L 586.2 340.3 L 585.9 342.0 L 586.3 343.3 L 585.4 344.4 L 586.1 346.3 L 587.0 346.6 L 587.2 347.0 L 587.0 347.6 L 587.4 348.9 L 586.8 350.1 L 587.3 350.4 L 586.7 350.9 L 586.9 351.4 L 586.7 351.9 L 586.3 352.0 L 586.3 351.4 L 585.8 351.6 L 585.9 352.3 L 585.2 353.1 L 584.4 356.3 L 584.0 356.3 L 584.0 356.9 L 583.1 358.0 L 583.4 359.3 L 583.0 359.8 L 583.1 360.6 L 582.0 361.8 L 582.3 362.1 L 582.0 363.0 L 580.6 363.2 L 580.8 364.8 L 580.2 365.2 L 579.9 366.5 L 579.4 367.1 L 579.4 367.7 L 580.2 368.5 L 580.1 369.2 L 580.4 369.2 L 579.5 371.0 L 579.8 371.2 L 579.2 371.1 L 578.5 371.5 L 577.7 373.5 L 577.7 374.5 L 577.2 374.8 L 577.4 375.2 L 576.7 375.5 L 575.9 377.0 L 574.6 378.2 L 573.3 379.1 L 571.6 379.4 L 567.2 379.2 L 565.9 380.9 L 563.4 382.6 L 562.4 382.0 L 561.9 382.2 L 561.8 383.0 L 561.9 382.4 L 561.2 383.0 L 560.5 382.6 L 559.0 383.5 L 556.4 383.5 L 555.3 384.1 L 554.6 383.6 L 554.0 384.3 L 551.4 385.2 L 550.8 384.7 L 549.7 385.1 L 549.1 385.7 L 548.5 385.7 L 548.2 385.3 L 546.6 385.7 Z"/>
+        <path d="M 576.8 255.7 L 576.1 257.0 L 574.6 257.5 L 573.5 258.3 L 572.6 258.2 L 571.1 259.6 L 567.5 259.6 L 566.3 259.4 L 566.8 259.2 L 566.4 259.1 L 564.2 259.4 L 561.2 260.1 L 558.7 261.7 L 557.5 261.6 L 556.6 262.7 L 556.2 264.6 L 555.6 265.6 L 555.6 267.0 L 555.1 267.1 L 554.0 268.1 L 552.3 270.0 L 551.9 271.4 L 551.3 271.7 L 551.2 272.2 L 550.5 272.3 L 550.0 273.0 L 549.7 272.9 L 549.9 272.4 L 549.4 271.0 L 547.9 269.6 L 546.5 270.4 L 546.5 270.1 L 545.3 269.8 L 546.2 270.1 L 546.0 269.6 L 545.5 269.8 L 545.6 269.3 L 543.9 269.0 L 542.3 270.2 L 541.3 269.3 L 540.2 269.1 L 538.9 269.3 L 537.6 270.3 L 536.9 269.4 L 537.2 266.6 L 536.2 265.1 L 537.4 263.8 L 539.7 263.2 L 539.8 262.0 L 540.6 261.5 L 541.2 260.2 L 542.3 259.8 L 543.9 257.7 L 543.1 256.0 L 543.4 255.3 L 543.2 253.3 L 543.7 252.7 L 543.2 252.1 L 543.1 251.2 L 543.9 250.0 L 543.2 247.9 L 543.7 246.7 L 543.8 244.9 L 545.6 241.9 L 545.9 240.5 L 546.9 240.3 L 548.3 239.1 L 549.1 237.6 L 550.6 236.7 L 551.2 235.8 L 552.3 235.6 L 552.7 235.0 L 553.1 235.4 L 553.9 234.9 L 554.3 233.5 L 555.2 232.9 L 556.1 233.1 L 557.0 232.6 L 558.8 232.6 L 559.6 231.9 L 561.7 232.9 L 562.6 231.1 L 564.0 231.1 L 564.0 230.7 L 565.3 230.2 L 565.6 228.8 L 566.2 228.8 L 566.4 228.4 L 568.0 227.8 L 568.4 227.2 L 569.1 227.4 L 568.3 226.4 L 568.9 225.5 L 569.8 225.9 L 570.1 225.5 L 571.3 225.4 L 571.7 226.6 L 572.6 226.8 L 574.4 224.9 L 575.7 224.7 L 576.3 223.9 L 577.3 223.4 L 579.6 223.8 L 583.4 226.8 L 585.8 225.9 L 588.6 222.5 L 588.6 221.2 L 589.1 220.1 L 588.8 219.8 L 588.9 218.0 L 590.5 215.7 L 590.9 214.3 L 590.6 213.8 L 591.1 213.5 L 591.2 212.6 L 591.6 211.9 L 592.5 211.5 L 592.6 209.7 L 595.5 208.0 L 596.1 207.3 L 596.5 206.0 L 597.1 208.3 L 597.8 208.7 L 598.7 208.4 L 599.3 209.1 L 599.5 208.7 L 599.1 208.3 L 599.4 208.5 L 599.6 209.3 L 600.1 209.3 L 600.1 209.8 L 600.5 210.0 L 601.2 209.9 L 601.8 211.1 L 603.4 211.4 L 603.3 211.8 L 604.0 213.1 L 603.6 213.5 L 603.9 215.3 L 602.8 218.0 L 603.3 218.6 L 602.9 218.7 L 602.6 220.3 L 600.2 221.4 L 599.9 221.7 L 600.2 221.9 L 600.0 222.2 L 599.5 222.1 L 598.4 223.9 L 597.3 224.8 L 597.4 226.9 L 598.8 228.2 L 598.6 228.7 L 599.7 229.3 L 599.5 230.1 L 599.9 230.9 L 597.8 236.4 L 597.1 236.9 L 597.5 238.5 L 596.8 239.5 L 596.7 240.4 L 597.5 242.0 L 597.3 242.9 L 596.7 243.6 L 595.7 243.8 L 595.7 245.1 L 595.1 245.9 L 594.8 245.8 L 594.9 246.2 L 593.8 246.4 L 594.0 246.9 L 594.3 246.8 L 594.3 247.3 L 592.8 247.3 L 590.9 248.4 L 590.5 249.2 L 589.9 249.2 L 589.8 249.9 L 589.3 250.3 L 588.7 249.9 L 588.0 252.1 L 588.3 250.8 L 587.9 250.9 L 587.7 251.6 L 587.8 250.6 L 587.5 250.5 L 585.9 252.4 L 586.2 252.8 L 586.7 251.8 L 587.2 251.4 L 587.2 252.0 L 586.9 251.8 L 586.1 253.1 L 585.5 252.7 L 585.2 253.0 L 585.0 253.5 L 585.5 253.9 L 584.8 254.0 L 585.1 253.9 L 585.1 253.0 L 584.1 253.3 L 584.5 253.6 L 584.3 253.8 L 584.1 253.2 L 583.5 253.0 L 583.4 253.4 L 582.3 253.8 L 581.2 253.6 L 580.9 254.0 L 580.2 253.8 L 579.7 254.3 L 578.1 254.6 L 576.8 255.7 Z"/>
+        </g>
+      </svg>
+      <div id="sp-dots"></div>
+    </div>
+    <div class="sp-seal">
+      <span class="sp-rule"></span>
+      <span class="sp-mark">canarias convive</span>
+      <span class="sp-tag">Gobierno de Canarias · ULL</span>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  var splash = document.getElementById('splash');
+  if (!splash) return;
+
+  // Pines por isla: posición (centro visual) y radio pre-calculados con la
+  // misma geometría del diseño (OptionC · outlines reales ISTAC). El pin crece
+  // una vez (pop) y se queda, escalonado de oeste a este.
+  var SP_DOTS = [{"cx":117,"cy":284.99,"r":5.7,"color":"#b15265"},{"cx":118.2,"cy":425.59,"r":4.19,"color":"#a99c81"},{"cx":168.35,"cy":371.53,"r":5.45,"color":"#4a4944"},{"cx":250.61,"cy":357.98,"r":13.67,"color":"#0d4e47"},{"cx":378.86,"cy":394.39,"r":12.4,"color":"#f55654"},{"cx":562.34,"cy":354.85,"r":7.83,"color":"#979c30"},{"cx":575.26,"cy":240.63,"r":7.75,"color":"#726d4c"}];
+  var dotsWrap = document.getElementById('sp-dots');
+  if (dotsWrap) {
+    SP_DOTS.forEach(function(is, i) {
+      var d = document.createElement('div');
+      d.className = 'sp-dot';
+      d.style.left = (is.cx - is.r) + 'px';
+      d.style.top = (is.cy - is.r) + 'px';
+      d.style.width = (is.r * 2) + 'px';
+      d.style.height = (is.r * 2) + 'px';
+      d.style.background = is.color;
+      d.style.animationDelay = (700 + i * 110) + 'ms';
+      dotsWrap.appendChild(d);
+    });
+  }
+
+  // Escala el marco 700×700 al viewport (con margen), centrado.
+  var frame = document.getElementById('splash-frame');
+  function fitSplash() {
+    if (!frame) return;
+    var s = Math.min(Math.min(window.innerWidth, window.innerHeight) * 0.92, 640) / 700;
+    frame.style.transform = 'scale(' + s + ')';
+  }
+  fitSplash();
+  window.addEventListener('resize', fitSplash);
+
+  // Timing: la entrada termina a ~2.85s. Garantizamos que se vea completa y se
+  // mantenga un breve respiro antes de desvanecer, pase lo que pase con la red.
+  var SPLASH_START = (window.performance && performance.now) ? performance.now() : Date.now();
+  var MIN_VISIBLE = 3650; // 2.85s animación + ~0.8s de respiro
+
+  var fallback = setTimeout(hideSplash, 8000); // por si el mapa nunca está listo
+  function hideSplash() {
+    clearTimeout(fallback);
+    window.removeEventListener('resize', fitSplash);
+    splash.classList.add('hidden');
+    setTimeout(function() { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 600);
+  }
+
+  // El mapa emite 'mapbox-ready' cuando estilo + datos están listos. Esperamos a
+  // que la animación se haya visto entera (MIN_VISIBLE) antes de ocultar.
+  document.addEventListener('mapbox-ready', function() {
+    var now = (window.performance && performance.now) ? performance.now() : Date.now();
+    var elapsed = now - SPLASH_START;
+    setTimeout(hideSplash, Math.max(0, MIN_VISIBLE - elapsed));
+  }, { once: true });
+  window.__hideSplash = hideSplash;
+})();
 </script>
 </body>
 </html>

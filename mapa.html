@@ -13,8 +13,8 @@
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.js"
         integrity="sha384-5kuWTSgWp7o0q4Mw8nndFaZqiHFMR1ypa8Xlv3Ef0eXMKYdWPwa5+335eGOMhx+r"
         crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@turf/turf@7.3.5/turf.min.js"
-        integrity="sha384-BQF91ViEyKh73QVOKMd0MfkJ7bWbu+o0g448Qfb7aP3HVPItiy/4UZ7OuTCUDKNi"
+<script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"
+        integrity="sha384-HkQmq7PC2BUVUkCsRUnOyzpliMb5M4pVPnjEiyI92tdS8buRHN6ZnehP1n1Acj84"
         crossorigin="anonymous"></script>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
@@ -248,6 +248,24 @@ details.sector-filter[open] summary::before { transform: rotate(90deg); }
   color: #F55654; text-decoration: none; font-weight: 600;
 }
 .mapboxgl-popup-content .pop-links a:hover { text-decoration: underline; }
+
+/* Lista de entidades co-ubicadas (cluster inseparable o marcadores apilados). */
+.popup-entity-list {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 8px; max-height: 240px; overflow-y: auto;
+}
+.popup-entity {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; border: 1px solid #ECECEC; border-radius: 7px;
+  background: #FFF; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12px; font-weight: 600; color: #333;
+  transition: all 0.15s;
+}
+.popup-entity:hover { border-color: #0D4E47; color: #0D4E47; background: #F2F8F7; }
+.popup-entity .pe-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.1);
+}
 
 /* Banner contextual del mapa: por defecto oculto (hidden). Solo se muestra
    cuando hay un aviso real (entidades descartadas por datos corruptos, etc.). */
@@ -636,47 +654,51 @@ function attachLogoFallbacks(container) {
   });
 }
 
-function hashId(id) {
-  let h = 0;
-  const s = id || '';
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) - h) + s.charCodeAt(i);
-    h |= 0;
-  }
-  return Math.abs(h);
-}
-
-function buildingFeature(f) {
-  const [lng, lat] = f.geometry.coordinates;
-  const sector = f.properties.sector;
-  const color = SECTOR_COLORS[sector] || '#999';
-  const h = hashId(f.properties.id);
-  const widthM = 26 + (h % 16);
-  const lengthM = 36 + ((h >> 4) % 24);
-  const rotation = (h >> 8) % 90;
-  const height = 45 + ((h >> 12) % 60);
-  const widthDeg = widthM / (111000 * Math.cos(lat * Math.PI / 180));
-  const lengthDeg = lengthM / 111000;
-  const rect = turf.bboxPolygon([
-    lng - widthDeg / 2, lat - lengthDeg / 2,
-    lng + widthDeg / 2, lat + lengthDeg / 2
-  ]);
-  const rotated = turf.transformRotate(rect, rotation, { pivot: [lng, lat] });
-  rotated.properties = {
-    id: f.properties.id,
-    sector,
-    color,
-    height
-  };
-  return rotated;
-}
-
 let GEOJSON = null;
 let map = null;
 let searchQuery = '';
 let currentMode = '2d';
-let zonesData = null;
 const seenMapErrors = new Set();
+
+// === CLUSTERING (supercluster) ===
+// El clustering nativo de Mapbox dibuja cada cluster en el centroide de sus
+// miembros: con entidades costeras ese centroide cae a menudo EN EL MAR.
+// Gestionamos el clustering a mano con supercluster para poder "anclar" cada
+// cluster sobre su miembro más cercano al centroide (siempre en tierra).
+const CLUSTER_RADIUS = 40;     // px, mismo valor que tenía el clustering nativo
+const CLUSTER_MAX_ZOOM = 16;   // a partir de aquí, todo desagrupado
+let clusterIndex = null;
+
+function rebuildClusterIndex(features) {
+  clusterIndex = new Supercluster({
+    radius: CLUSTER_RADIUS,
+    maxZoom: CLUSTER_MAX_ZOOM,
+    minPoints: 2
+  });
+  clusterIndex.load(features);
+}
+
+// Recalcula los clusters para el zoom actual y los vuelca en la fuente.
+// Los clusters de supercluster traen point_count/point_count_abbreviated,
+// así que las capas (clusters, cluster-count, unclustered-point) no cambian.
+function updateClusters() {
+  if (!map || !clusterIndex || !map.getSource('entities')) return;
+  const zoom = Math.floor(map.getZoom());
+  const features = clusterIndex.getClusters([-180, -85, 180, 85], zoom);
+  features.forEach(c => {
+    if (!c.properties.cluster) return;
+    // Ancla el cluster en tierra: miembro más cercano al centroide.
+    const [clng, clat] = c.geometry.coordinates;
+    let best = null, bestD = Infinity;
+    clusterIndex.getLeaves(c.properties.cluster_id, Infinity).forEach(l => {
+      const [lng, lat] = l.geometry.coordinates;
+      const d = (lng - clng) * (lng - clng) + (lat - clat) * (lat - clat);
+      if (d < bestD) { bestD = d; best = l; }
+    });
+    if (best) c.geometry = { type: 'Point', coordinates: best.geometry.coordinates.slice() };
+  });
+  map.getSource('entities').setData({ type: 'FeatureCollection', features });
+}
 
 // === FILTROS DINÁMICOS ===
 // Los filtros se generan a partir de las columnas del Sheet (props._filters).
@@ -767,15 +789,18 @@ function setSelectedEntity(id) {
 // y como maxBounds del mapa para evitar que el usuario acabe en África.
 const CANARIAS_NAV_BOUNDS = [[-19.5, 26.5], [-12.3, 30.5]];
 
-// Valida que una geometría tenga coordenadas numéricas finitas dentro de los
-// rangos válidos de lat/lng. Rechaza null/string/Infinity/NaN/fuera de rango.
+// Valida que una geometría tenga coordenadas numéricas finitas dentro del
+// archipiélago. Rechaza null/string/Infinity/NaN y puntos fuera de Canarias:
+// una coordenada en Madrid o en mitad del Atlántico es un error de datos, y
+// además quedaría fuera del área navegable (maxBounds), inaccesible.
 function hasValidCoords(f) {
   const c = f && f.geometry && f.geometry.coordinates;
   if (!Array.isArray(c) || c.length !== 2) return false;
   const [lng, lat] = c;
   if (typeof lng !== 'number' || typeof lat !== 'number') return false;
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
-  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) return false;
+  const [[w, s], [e, n]] = CANARIAS_NAV_BOUNDS;
+  if (lng < w || lng > e || lat < s || lat > n) return false;
   return true;
 }
 
@@ -841,11 +866,6 @@ async function load() {
     let s = (f.properties.sector || '').trim();
     f.properties.sector = s || 'Sin sector';
   });
-
-  zonesData = {
-    type: 'FeatureCollection',
-    features: GEOJSON.features.map(f => buildingFeature(f))
-  };
 
   initSidebar();
   applyFilter();
@@ -941,7 +961,6 @@ function initSidebar() {
     btn2.classList.add('active'); btn2.setAttribute('aria-pressed', 'true');
     btn3.classList.remove('active'); btn3.setAttribute('aria-pressed', 'false');
     currentMode = '2d';
-    setTowersVisible(false);
     if (map) map.fitBounds(CANARIAS_BOUNDS, { padding: 40, pitch: 0, bearing: 0, duration: 1200 });
   });
 
@@ -1099,19 +1118,8 @@ function updateFacetedCounts() {
 
 function applyFilter() {
   const filtered = getFilteredFeatures();
-  if (map && map.getSource('entities')) {
-    map.getSource('entities').setData({
-      type: 'FeatureCollection',
-      features: filtered
-    });
-    if (map.getSource('zones')) {
-      const filteredIds = new Set(filtered.map(f => f.properties.id));
-      map.getSource('zones').setData({
-        type: 'FeatureCollection',
-        features: zonesData.features.filter(z => filteredIds.has(z.properties.id))
-      });
-    }
-  }
+  rebuildClusterIndex(filtered);
+  updateClusters();
   document.getElementById('results-count').textContent = filtered.length;
   renderEntityList(filtered);
   updateFacetedCounts();
@@ -1180,7 +1188,36 @@ function flyToFeature(f) {
   const coords = f.geometry.coordinates;
   const pitchKeep = currentMode === '3d' ? 65 : 0;
   const bearingKeep = currentMode === '3d' ? -17 : 0;
-  map.flyTo({ center: coords, zoom: 16, pitch: pitchKeep, bearing: bearingKeep, duration: 1500 });
+  // Zoom 17 > CLUSTER_MAX_ZOOM: garantiza que la entidad llega desagrupada
+  // y su halo de selección es visible.
+  map.flyTo({ center: coords, zoom: 17, pitch: pitchKeep, bearing: bearingKeep, duration: 1500 });
+}
+
+// Popup con la lista de entidades de un punto/cluster co-ubicado. Cada fila
+// abre su ficha. Se usa al pulsar un cluster inseparable o un montón apilado.
+let entityListPopup = null;
+function showEntityListPopup(features, lngLat) {
+  const items = features.map(f => {
+    const p = f.properties;
+    const color = SECTOR_COLORS[p.sector] || '#999';
+    return `<button type="button" class="popup-entity" data-id="${escapeHTML(p.id)}">` +
+           `<span class="pe-dot" style="background:${color}"></span>` +
+           `<span>${escapeHTML(p.name)}</span></button>`;
+  }).join('');
+  const html = `<h3>${features.length} entidades en este punto</h3>` +
+               `<div class="popup-entity-list">${items}</div>`;
+  if (entityListPopup) entityListPopup.remove();
+  entityListPopup = new mapboxgl.Popup({ maxWidth: '320px', offset: 12 })
+    .setLngLat(lngLat).setHTML(html).addTo(map);
+  entityListPopup.getElement().querySelectorAll('.popup-entity').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const full = GEOJSON.features.find(f => f.properties.id === btn.dataset.id);
+      if (!full) return;
+      entityListPopup.remove();
+      flyToFeature(full);
+      showDetail(full);
+    });
+  });
 }
 
 function formatMapError(err, event) {
@@ -1378,18 +1415,10 @@ function setView(mode) {
   btn3.setAttribute('aria-pressed', String(mode === '3d'));
   if (!map) return;
   if (mode === '3d') {
-    setTowersVisible(true);
     map.easeTo({ pitch: 65, bearing: -17, duration: 1200 });
   } else {
-    setTowersVisible(false);
     map.easeTo({ pitch: 0, bearing: 0, duration: 1000 });
   }
-}
-
-function setTowersVisible(visible) {
-  if (!map) return;
-  const vis = visible ? 'visible' : 'none';
-  if (map.getLayer('zones')) map.setLayoutProperty('zones', 'visibility', vis);
 }
 
 function initMap() {
@@ -1419,8 +1448,8 @@ function initMap() {
   map.on('load', () => {
     // El estilo importa Mapbox Standard, que pide sources internas como
     // `mapbox-3d-events` y `3dbuildings`. En el plan free pueden dar 403
-    // y ensucian la consola. Como ya pintamos nuestros propios edificios
-    // sector-coloreados con el layer `zones`, los nativos son redundantes.
+    // y ensucian la consola; además los edificios 3D nativos no aportan
+    // a un mapa de marcadores. Se desactivan.
     try {
       map.setConfigProperty('basemap', 'show3dObjects', false);
     } catch (e) { /* import config may not estar disponible en estilos antiguos */ }
@@ -1440,7 +1469,9 @@ function initMap() {
       tileSize: 512,
       maxzoom: 14
     });
-    map.setTerrain({ source: 'mapbox-dem', exaggeration: 2.5 });
+    // Exageración contenida: con 2.5 el relieve quedaba espectacular pero los
+    // marcadores (pegados al terreno) se desplazaban mucho al inclinar la cámara.
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
 
     try {
       map.setLight({
@@ -1451,28 +1482,11 @@ function initMap() {
       });
     } catch (e) { /* light may be locked by style */ }
 
+    // Sin cluster:true — el clustering lo hace supercluster en updateClusters()
+    // para poder anclar cada cluster en tierra (ver comentario arriba).
     map.addSource('entities', {
       type: 'geojson',
-      data: GEOJSON,
-      cluster: true,
-      clusterRadius: 40,
-      clusterMaxZoom: 13
-    });
-
-    map.addSource('zones', { type: 'geojson', data: zonesData });
-
-    map.addLayer({
-      id: 'zones',
-      type: 'fill-extrusion',
-      source: 'zones',
-      layout: { visibility: 'none' },
-      paint: {
-        'fill-extrusion-color': ['get', 'color'],
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0, 11, 0.55],
-        'fill-extrusion-vertical-gradient': true
-      }
+      data: { type: 'FeatureCollection', features: [] }
     });
 
     map.addLayer({
@@ -1550,26 +1564,42 @@ function initMap() {
 
     map.on('click', 'clusters', (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
-      if (!features.length) return;
+      if (!features.length || !clusterIndex) return;
       const feat = features[0];
       const center = feat.geometry.coordinates;
-      // En Mapbox GL JS v3 getClusterExpansionZoom devuelve una Promise (se
-      // eliminó la firma con callback), por eso la versión anterior con
-      // callback nunca expandía el cluster. Soportamos ambas APIs por robustez.
-      const applyZoom = (zoom) => {
-        if (typeof zoom === 'number' && isFinite(zoom)) {
-          map.easeTo({ center, zoom: Math.min(zoom + 0.5, 18) });
-        }
-      };
-      const ret = map.getSource('entities')
-        .getClusterExpansionZoom(feat.properties.cluster_id, (err, zoom) => { if (!err) applyZoom(zoom); });
-      if (ret && typeof ret.then === 'function') {
-        ret.then(applyZoom).catch((err) => console.warn('Cluster expansion failed:', err));
+      let expansion;
+      try {
+        expansion = clusterIndex.getClusterExpansionZoom(feat.properties.cluster_id);
+      } catch (err) {
+        console.warn('Cluster expansion failed:', err);
+        return;
+      }
+      // Si el cluster no se separa ni al zoom máximo de clustering, son
+      // entidades (casi) co-ubicadas: en vez de un zoom infinito que nunca
+      // las separa, mostramos la lista para elegir.
+      if (expansion > CLUSTER_MAX_ZOOM) {
+        showEntityListPopup(clusterIndex.getLeaves(feat.properties.cluster_id, Infinity), center);
+      } else {
+        map.easeTo({ center, zoom: Math.min(expansion + 0.5, 18) });
       }
     });
 
     map.on('click', 'unclustered-point', (e) => {
-      const clicked = e.features[0];
+      // queryRenderedFeatures devuelve TODAS las features bajo el cursor: si
+      // hay varias entidades apiladas en el mismo punto, se elige de una lista
+      // (antes solo la de arriba era clicable).
+      const seen = new Set();
+      const stacked = (e.features || []).filter(f => {
+        if (seen.has(f.properties.id)) return false;
+        seen.add(f.properties.id);
+        return true;
+      });
+      if (stacked.length > 1) {
+        showEntityListPopup(stacked, stacked[0].geometry.coordinates);
+        return;
+      }
+      const clicked = stacked[0];
+      if (!clicked) return;
       const full = GEOJSON.features.find(f => f.properties.id === clicked.properties.id) || clicked;
       flyToFeature(full);
       showDetail(full);
@@ -1579,6 +1609,9 @@ function initMap() {
       map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
     });
+
+    // El clustering manual depende del zoom: recalcular al terminar cada zoom.
+    map.on('zoomend', updateClusters);
 
     applyFilter();
     // Si la URL trajo islas filtradas, vuela a ellas al cargar el mapa.

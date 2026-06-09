@@ -37,8 +37,9 @@ Formulario de alta  →  Hoja oficial "Canarias Convive" (Google Sheets)
 ```
 
 - El equipo aprueba las entidades en la hoja oficial.
-- Una **GitHub Action** (`.github/workflows/sync-sheet.yml`) lee la hoja **cada hora**, geocodifica las direcciones y regenera `entities.geojson`.
+- Una **GitHub Action** (`.github/workflows/sync-sheet.yml`) lee la hoja **cada hora** y regenera `entities.geojson`.
 - El mapa carga ese archivo → cualquier **alta, cambio o baja** en la hoja se ve en el mapa en **menos de una hora**, sin tocar nada.
+- Cada sync **valida las ubicaciones** (coordenadas dentro de Canarias y en tierra, isla y municipio coherentes con el punto) y publica el resultado en el resumen del run, para corregir el Sheet en cuanto un dato venga mal.
 
 ## Cómo está montado en la web
 
@@ -49,10 +50,10 @@ La página `canariasconvive.com/mapa-interactivo/` (WordPress, plantilla en blan
 ## Funcionalidades
 
 - **Estilo Mapbox propio** con la paleta corporativa (verde `#0D4E47`, coral `#F55654`, oliva `#979C30`, burdeos `#B15265`) y tipografía Montserrat.
-- **Clustering automático**: los marcadores se agrupan al solaparse; al hacer clic en un grupo, el mapa hace zoom y se desagrupa.
+- **Clustering automático anclado en tierra**: los marcadores se agrupan al solaparse y el círculo del grupo se dibuja siempre sobre uno de sus miembros (nunca en el mar). Al hacer clic, el mapa hace zoom y se desagrupa; si varias entidades comparten sede, se muestra la lista para elegir.
 - **Marcadores coloreados por sector**, reconocibles de un vistazo.
 - **Filtros dinámicos**: se generan **automáticamente desde las columnas de la hoja** (isla, sector, tipología, protagonista, municipio, entidades RECEX…). Añadir una columna nueva en el Sheet = filtro nuevo en el mapa, sin tocar código.
-- **Vista 3D con terreno real** (Mapbox DEM, exageración 2.5×): Teide, Caldera de Taburiente y demás relieve en perspectiva.
+- **Vista 3D con terreno real** (Mapbox DEM): Teide, Caldera de Taburiente y demás relieve en perspectiva.
 - **Búsqueda** por substring, insensible a acentos y mayúsculas (nombre, municipio, provincia, dirección, sector, protagonista).
 - **Panel de detalle** con dirección, teléfono, email, redes, logo y botón “Cómo llegar”.
 - **Enlace directo a una entidad** vía `?entity={uuid}`; los filtros y la búsqueda se guardan en la URL (se puede compartir la vista exacta).
@@ -61,7 +62,7 @@ La página `canariasconvive.com/mapa-interactivo/` (WordPress, plantilla en blan
 
 ## Stack
 
-- [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/) v3.21 + [Turf.js](https://turfjs.org/) v7.3 (geometrías 3D).
+- [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/) v3.21 + [supercluster](https://github.com/mapbox/supercluster) v8 (clustering anclado en tierra).
 - JavaScript *vanilla*, sin frameworks ni *build*.
 - **GitHub Pages** — hosting del visor y los datos.
 - **GitHub Actions** — sincronización horaria con el Google Sheet (vía *service account*).
@@ -78,6 +79,10 @@ La página `canariasconvive.com/mapa-interactivo/` (WordPress, plantilla en blan
 ├── guia.html             # Guía del sistema de mapas
 ├── entities.geojson      # Datos (los regenera la Action desde la hoja oficial)
 ├── entities-raw.json     # Volcado inicial de referencia
+├── scripts/
+│   ├── geo_checks.py             # Validación geográfica (la usa la Action en cada sync)
+│   ├── audit_geo.py              # Auditoría completa + informe de correcciones del Sheet
+│   └── canarias-municipios.geojson  # Límites municipales (ISTAC vía Opendatasoft, simplificados)
 ├── captura-mapa.webp     # Captura del visor en producción
 ├── captura-web.webp      # Captura de la página de agentes en canariasconvive.com
 └── .github/workflows/
