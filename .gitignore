@@ -5,7 +5,12 @@ node_modules/
 *.log
 .env
 .env.local
-scripts/
+# Utilidades locales privadas, EXCEPTO la validación geográfica, que la
+# necesita la GitHub Action (sync-sheet.yml) en cada checkout.
+scripts/*
+!scripts/geo_checks.py
+!scripts/audit_geo.py
+!scripts/canarias-municipios.geojson
 
 # Semilla de importación al Sheet (el Sheet es ahora la fuente de verdad)
 canarias-convive-sheet.csv
