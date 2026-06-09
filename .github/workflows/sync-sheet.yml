@@ -108,13 +108,32 @@ jobs:
               'Teléfonos', 'Emails', 'Web', 'Facebook', 'Instagram', 'Twitter', 'Logo ID',
           }
 
-          features, skipped = [], 0
+          # Rango duro del archipiélago (el mismo de scripts/geo_checks.py). Una
+          # coordenada "válida" globalmente pero fuera de Canarias (Madrid, mar
+          # abierto, swap lat/lng...) es un error de datos: no se publica.
+          def in_canarias(lat, lng):
+              return 27.3 <= lat <= 29.6 and -18.6 <= lng <= -13.2
+
+          # Typos conocidos de la columna Municipio (clave en minúsculas y sin
+          # acentos). Se normalizan aquí para que el filtro del mapa no muestre
+          # el mismo municipio duplicado; el Sheet debe corregirse igualmente.
+          import unicodedata
+          MUNI_ALIASES = {
+              'puerto la cruz': 'Puerto de la Cruz',
+          }
+          def norm_key(s):
+              s = unicodedata.normalize('NFD', s.lower())
+              return ''.join(c for c in s if unicodedata.category(c) != 'Mn').strip()
+          def fix_muni(s):
+              return MUNI_ALIASES.get(norm_key(s), s)
+
+          features, skipped = [], []
           for r in rows[1:]:
               if not any(c.strip() for c in r):
                   continue  # fila vacía
               lat, lng = parse_coord(cell(r, 'Latitud')), parse_coord(cell(r, 'Longitud'))
-              if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
-                  skipped += 1
+              if lat is None or lng is None or not in_canarias(lat, lng):
+                  skipped.append(cell(r, 'Nombre') or '(sin nombre)')
                   continue
               split = lambda s: [x.strip() for x in s.split(';') if x.strip()]
               props = {
@@ -128,7 +147,7 @@ jobs:
                   'facebook': cell(r, 'Facebook'),
                   'twitter': cell(r, 'Twitter'),
                   'address': cell(r, 'Dirección'),
-                  'municipality': cell(r, 'Municipio'),
+                  'municipality': fix_muni(cell(r, 'Municipio')),
                   'province': cell(r, 'Provincia'),
                   'phones': split(cell(r, 'Teléfonos')),
                   'emails': split(cell(r, 'Emails')),
@@ -144,7 +163,7 @@ jobs:
                       continue
                   v = cell(r, col)
                   if v:
-                      filters[col] = v
+                      filters[col] = fix_muni(v) if col == 'Municipio' else v
               props['_filters'] = filters
               features.append({
                   'type': 'Feature',
@@ -159,7 +178,20 @@ jobs:
           fc = {'type': 'FeatureCollection', 'features': features}
           with open('entities.geojson', 'w', encoding='utf-8') as fh:
               json.dump(fc, fh, ensure_ascii=False, separators=(', ', ': '))
-          print(f'{len(features)} entidades escritas, {skipped} descartadas por coords.')
+          print(f'{len(features)} entidades escritas, {len(skipped)} descartadas por coords.')
+          for name in skipped:
+              print(f'::warning::Fila descartada (sin coordenadas válidas en Canarias): {name}')
+
+      # Validación geográfica (no bloquea el sync): coordenadas en el mar,
+      # isla/municipio declarados que no coinciden con el punto, typos de
+      # municipio... El resumen sale en la página del run para que el equipo
+      # vea qué corregir en el Sheet.
+      - name: Informe de calidad de datos
+        if: always()
+        run: |
+          if [ -f entities.geojson ]; then
+            python3 scripts/geo_checks.py entities.geojson --summary >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Commitear si hay cambios
         run: |
